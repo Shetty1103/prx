@@ -1,5 +1,4 @@
 import hashlib
-from pathlib import Path
 import logging
 
 import prx.helpers
@@ -12,10 +11,7 @@ import math
 import joblib
 import georinex
 import imohash
-
-
-memory = joblib.Memory(Path(__file__).parent.joinpath("diskcache"), verbose=0)
-
+from pathlib import Path
 
 logging.basicConfig(
     format="%(asctime)s,%(msecs)03d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s",
@@ -25,6 +21,8 @@ logging.basicConfig(
 
 log = logging.getLogger(__name__)
 
+
+memory = joblib.Memory(Path(__file__).parent.joinpath("diskcache"), verbose=0)
 
 def get_logger(label):
     return logging.getLogger(label)
@@ -264,6 +262,96 @@ def compute_relativistic_clock_effect(sat_pos_m: np.array, sat_vel_mps: np.array
     return relativistic_clock_effect_m
 
 
+def parse_rinex_nav_file(file_path):
+    time_system_corr_dict = {}
+    with open(file_path, 'r') as f:
+        for line in f:
+            if line.startswith("GPUT"):  # Example line indicating TIME SYSTEM CORR for GPS
+                constellation = 'G'
+                data = line.split()
+                time_system_corr_dict[constellation] = {
+                    'A0': float(data[1]),
+                    'A1': float(data[2]),
+                    'T': int(data[3])
+                }
+            elif line.startswith("GLUT"):  # Example line indicating TIME SYSTEM CORR for GLO
+                constellation = 'R'
+                data = line.split()
+                time_system_corr_dict[constellation] = {
+                    'A0': -float(data[1]),  # Exception for GLO
+                    'A1': 0, #float(data[2]) as for GLO A1:0
+                    'T': int(data[3])
+                }
+            elif line.startswith("GAUT"):  # Example line indicating TIME SYSTEM CORR for GAL
+                constellation = 'E'
+                data = line.split()
+                time_system_corr_dict[constellation] = {
+                    'A0': float(data[1]),
+                    'A1': float(data[2]),
+                    'T': int(data[3])
+                }
+            elif line.startswith("BDUT"):  # Example line indicating TIME SYSTEM CORR for BDS
+                constellation = 'C'
+                data = line.split()
+                time_system_corr_dict[constellation] = {
+                    'A0': float(data[1]),
+                    'A1': float(data[2]),
+                    'T': int(data[3])
+                }
+            elif line.startswith("IRUT"):  # Example line indicating TIME SYSTEM CORR for IRN
+                constellation = 'I'
+                data = line.split()
+                # Handle the formatting issue in IRUT line
+                a0 = data[1][:16]  # Splitting the combined A0 and A1 values
+                a1 = data[1][16:]  # Extracting A0 part
+                time_system_corr_dict[constellation] = {
+                    'A0': float(a0),
+                    'A1': float(a1),
+                    'T': int(data[2])
+                }
+            elif line.startswith("QZUT"):  # Example line indicating TIME SYSTEM CORR for QZS
+                constellation = 'J'
+                data = line.split()
+                time_system_corr_dict[constellation] = {
+                    'A0': float(data[1]),
+                    'A1': float(data[2]),
+                    'T': int(data[3])
+                }
+            elif line.startswith("SBUT"):  # Example line indicating TIME SYSTEM CORR for SBAS
+                constellation = 'S'
+                data = line.split()
+                time_system_corr_dict[constellation] = {
+                    'A0': float(data[1]),
+                    'A1': float(data[2]),
+                    'T': int(data[3])
+                }
+    return time_system_corr_dict
+
+
+def compute_icb_all_constellations(time_system_corr_dict):
+    # Speed of light in meters per second
+
+    icb_dict = {}  # Dictionary to store ICB values for all constellations
+    # Compute ICB for each constellation
+    for constellation in ['G', 'R', 'E', 'C', 'I', 'J', 'S']:
+        if constellation in time_system_corr_dict:
+            ref_a0 = time_system_corr_dict['G']['A0']
+            ref_a1 = time_system_corr_dict['G']['A1']
+            ref_t = time_system_corr_dict['G']['T']
+
+            a0 = time_system_corr_dict[constellation]['A0']
+            a1 = time_system_corr_dict[constellation]['A1']
+            t = time_system_corr_dict[constellation]['T']
+
+            time_system_corr_ref = ref_a0 + ref_a1 * (t - ref_t)
+            time_system_corr = a0 + a1 * (t - ref_t)
+
+            icb = (time_system_corr_ref - time_system_corr) * constants.cGpsSpeedOfLight_mps
+            icb_dict[constellation] = icb  # Store ICB with constellation code as key
+        else:
+            icb_dict[constellation] = np.nan
+    return icb_dict
+
 def compute_satellite_elevation_and_azimuth(sat_pos_ecef, receiver_pos_ecef):
     """
     sat_pos_ecef: np.array of shape (n, 3)
@@ -299,7 +387,6 @@ def compute_satellite_elevation_and_azimuth(sat_pos_ecef, receiver_pos_ecef):
     angle_up_los_deg = np.rad2deg(np.arccos(np.dot(unit_vector_rx_satellite_ecef, up)))
     sat_elevation_deg_2 = 90 - angle_up_los_deg
     return elevation_rad, azimuth_rad
-
 
 def ecef_2_geodetic(pos_ecef):
     """Reference:

@@ -1,17 +1,16 @@
 import argparse
 import json
+
 from pathlib import Path
 import georinex
 import pandas as pd
 import numpy as np
 import git
 import joblib
-
 from prx import atmospheric_corrections as atmo
 from prx.rinex_nav import nav_file_discovery
 from prx import constants, helpers, converters
 from prx.rinex_nav import evaluate as rinex_evaluate
-
 memory = joblib.Memory(Path(__file__).parent.joinpath("diskcache"), verbose=0)
 
 log = helpers.get_logger(__name__)
@@ -135,6 +134,7 @@ def write_csv_file(
             "rnx_obs_identifier",
         ]
     )
+
     records.to_csv(
         path_or_buf=output_file,
         index=False,
@@ -362,8 +362,14 @@ def _build_records_cached(
         sat_states.elevation_rad.to_numpy(),
     )
     sat_states["tropo_delay_m"] = tropo_delay_m
+    # Compute time_system_corr_dict somewhere in your code before using it
+    sat_states["constellation"] = sat_states["satellite"].str[0]
+    rinex_file_path = r"D:\git_repositories\prx\src\prx\test\tmp_test_directory_prx.test.test_main\BRDC00IGS_R_20230010000_01D_MN.rnx"
+    time_system_corr_dict = helpers.parse_rinex_nav_file(rinex_file_path)  # Define your dictionary here
+    icb_all_constellations = helpers.compute_icb_all_constellations(time_system_corr_dict)
+    # Call the compute_icb_all_constellations function
+    sat_states['inter_constellation_bias_m'] = sat_states.apply(lambda row: icb_all_constellations.get(row['constellation'], np.nan), axis=1)
 
-    # Merge in all sat states that are not signal-specific, i.e. can be copied into
     # rows with Doppler and carrier phase observations
     # TODO understand why dropping duplicates with
     #  subset=['satellite', 'time_of_emission_isagpst']
@@ -371,7 +377,7 @@ def _build_records_cached(
     #  the same satellite and the same time of emission
     sat_specific = sat_states[
         sat_states.columns.drop(
-            ["observation_type", "sat_instrumental_delay_m", "time_of_reception_in_receiver_time"]
+            ["observation_type", "sat_instrumental_delay_m", "time_of_reception_in_receiver_time","constellation"]
         )
     ].drop_duplicates(subset=["satellite", "time_of_emission_isagpst"])
     # Group delays are signal-specific, so we merge them in separately
@@ -435,7 +441,6 @@ def _build_records_cached(
 
     return flat_obs
 
-
 def process(observation_file_path: Path, output_format="jsonseq"):
     # We expect a Path, but might get a string here:
     observation_file_path = Path(observation_file_path)
@@ -447,13 +452,13 @@ def process(observation_file_path: Path, output_format="jsonseq"):
     aux_files = nav_file_discovery.discover_or_download_auxiliary_files(
         rinex_3_obs_file
     )
+
     write_prx_file(
         build_header([rinex_3_obs_file, aux_files["broadcast_ephemerides"]]),
         build_records(rinex_3_obs_file, aux_files["broadcast_ephemerides"]),
         prx_file,
         output_format,
     )
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

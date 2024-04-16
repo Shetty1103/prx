@@ -3,7 +3,7 @@ import pytest
 from prx import helpers
 from prx import constants
 import pandas as pd
-
+import math
 
 def test_rinex_header_time_string_2_timestamp_ns():
     assert helpers.timestamp_2_timedelta(
@@ -156,3 +156,43 @@ def test_sagnac_effect():
     # millimeter accuracy should be sufficient
     tolerance = 1e-3
     assert np.max(np.abs(sagnac_effect_computed - sagnac_effect_reference)) < tolerance
+
+def test_parse_rinex_nav_file():
+    # Provide a path to a sample RINEX NAV file for testing
+    rinex_nav_file_path = r"D:\git_repositories\prx\src\prx\test\tmp_test_directory_prx.test.test_main\BRDC00IGS_R_20230010000_01D_MN.rnx"
+
+    # Call the function to parse the RINEX NAV file
+    time_system_corr_dict = helpers.parse_rinex_nav_file(rinex_nav_file_path)
+
+    # Ensure that the returned dictionary is not empty
+    assert time_system_corr_dict, "The parsed RINEX NAV file is empty."
+
+    # Print the contents of the time_system_corr_dict for debug
+    print("Parsed time_system_corr_dict:", time_system_corr_dict)
+
+    # Ensure that the returned dictionary contains entries for all constellations
+    assert all(constellation in time_system_corr_dict and not math.isnan(time_system_corr_dict[constellation]['A0']) for constellation in ['G', 'R', 'E', 'C', 'I', 'J', 'SBAS']), "Not all constellations are present in the parsed data or some are set to 'nan'."
+
+def test_compute_icb_all_constellations():
+    # Mock time_system_corr_dict with data for testing
+    time_system_corr_dict = {
+        'G': {'A0': 0.0, 'A1': 0.0, 'T': 0},
+        'R': {'A0': 0.0, 'A1': 0.0, 'T': 0},
+        'E': {'A0': 0.0, 'A1': 0.0, 'T': 0},
+        'C': {'A0': 0.0, 'A1': 0.0, 'T': 0},
+        'I': {'A0': 0.0, 'A1': 0.0, 'T': 0},
+        'J': {'A0': 0.0, 'A1': 0.0, 'T': 0},
+        'S': {'A0': 0.0, 'A1': 0.0, 'T': 0}
+    }
+
+    # Call the function to compute ICB for all constellations
+    icb_dict = helpers.compute_icb_all_constellations(time_system_corr_dict)
+
+    # Ensure that the returned dictionary is not empty
+    assert icb_dict
+
+    # Ensure that the returned dictionary contains entries for all constellations
+    assert all(constellation in icb_dict for constellation in ['G', 'R', 'E', 'C', 'I', 'J', 'S'])
+
+    # Ensure that each entry in the dictionary is either a float or NaN
+    assert all(isinstance(icb, (float, int, math.nan)) for icb in icb_dict.values())

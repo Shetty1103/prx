@@ -5,7 +5,6 @@ import shutil
 import subprocess
 import pandas as pd
 import pytest
-
 from prx import helpers
 from prx import constants
 from prx import main
@@ -61,7 +60,6 @@ def test_prx_command_line_call_with_csv_output(input_for_test):
     assert result.returncode == 0
     assert expected_prx_file.exists()
 
-
 def test_prx_function_call_with_csv_output(input_for_test):
     test_file = input_for_test
     main.process(observation_file_path=test_file, output_format="csv")
@@ -75,9 +73,6 @@ def test_prx_function_call_with_csv_output(input_for_test):
     assert (
         df[(df.prn == 14) & (df.constellation == "C")].sat_elevation_deg - 34.86
     ).abs().max() < 0.3
-
-
-
 
 
 
@@ -105,7 +100,7 @@ def test_csv_format():
 
     # List of expected field names after renaming
     fields_expected = ['sat_clock_offset_m', 'sat_clock_drift_mps', 'sat_pos_x_m','sat_vel_x_mps',
-    'sat_instrumental_delay_m','iono_delay_m','sat_elevation_deg','sat_azim_deg','rnx_obs_identifier','C_obs_m']
+    'sat_instrumental_delay_m','iono_delay_m','sat_elevation_deg','sat_azim_deg','rnx_obs_identifier','C_obs_m','inter_constellation_bias_m']
 
     # Check if the renamed fields are present in the DataFrame columns
     for field in fields_expected:
@@ -120,3 +115,5 @@ def test_csv_format():
     assert data_prx.iloc[0].doppler_observation_hz == -19.17200
     assert data_prx.iloc[0].carrier_observation_m == 39902329.09610697
     assert data_prx.iloc[0].cn0_dbhz == 35.60000
+    assert data_prx.iloc[0].inter_constellation_bias_m == 0.44217620522989814
+
