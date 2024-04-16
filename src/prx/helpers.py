@@ -278,24 +278,29 @@ def parse_rinex_nav_file(file_path):
                 constellation = 'R'
                 data = line.split()
                 time_system_corr_dict[constellation] = {
-                    'A0': -float(data[1]),  # Exception for GLO
-                    'A1': 0, #float(data[2]) as for GLO A1:0
+                    'A0': float(data[1]),  # Exception for GLO
+                    'A1': float(data[2]),
                     'T': int(data[3])
                 }
             elif line.startswith("GAUT"):  # Example line indicating TIME SYSTEM CORR for GAL
                 constellation = 'E'
                 data = line.split()
+                # Handle the formatting issue in BDUT line
+                a0 = data[1][:17]
                 time_system_corr_dict[constellation] = {
-                    'A0': float(data[1]),
+                    'A0': float(a0),
                     'A1': float(data[2]),
                     'T': int(data[3])
                 }
             elif line.startswith("BDUT"):  # Example line indicating TIME SYSTEM CORR for BDS
                 constellation = 'C'
                 data = line.split()
+                # Handle the formatting issue in BDUT line
+                a0 = data[1][:17]
+                #a1 = data[1][16:]
                 time_system_corr_dict[constellation] = {
-                    'A0': float(data[1]),
-                    'A1': float(data[2]),
+                    'A0': float(a0), #float(data[1]),#float(a0),
+                    'A1': float(data[2]),#float(a1),
                     'T': int(data[3])
                 }
             elif line.startswith("IRUT"):  # Example line indicating TIME SYSTEM CORR for IRN

@@ -1,9 +1,13 @@
-import numpy as np
-import pytest
-from prx import helpers
+import shutil
+import os
+from pathlib import Path
+from prx import helpers, converters, parse_rinex
 from prx import constants
 import pandas as pd
 import math
+import numpy as np
+import pytest
+
 
 def test_rinex_header_time_string_2_timestamp_ns():
     assert helpers.timestamp_2_timedelta(
@@ -157,42 +161,53 @@ def test_sagnac_effect():
     tolerance = 1e-3
     assert np.max(np.abs(sagnac_effect_computed - sagnac_effect_reference)) < tolerance
 
-def test_parse_rinex_nav_file():
-    # Provide a path to a sample RINEX NAV file for testing
-    rinex_nav_file_path = r"D:\git_repositories\prx\src\prx\test\tmp_test_directory_prx.test.test_main\BRDC00IGS_R_20230010000_01D_MN.rnx"
+@pytest.fixture
+def rnx3_input_for_test():
+    test_directory = Path(f"./tmp_test_directory_{__name__}").resolve()
+    if test_directory.exists():
+        # Start from empty directory, might avoid hiding some subtle bugs, e.g.
+        # file decompression not working properly
+        shutil.rmtree(test_directory)
+    os.makedirs(test_directory)
 
-    # Call the function to parse the RINEX NAV file
-    time_system_corr_dict = helpers.parse_rinex_nav_file(rinex_nav_file_path)
+    rnx3_nav_test_file = test_directory.joinpath("BRDC00IGS_R_20230010000_01D_MN.rnx")
+    shutil.copy(
+        helpers.prx_repository_root()
+        / f"src/prx/test/datasets/TLSE_2023001/{rnx3_nav_test_file.name}",
+        rnx3_nav_test_file,
+    )
+    assert rnx3_nav_test_file.exists()
 
-    # Ensure that the returned dictionary is not empty
-    assert time_system_corr_dict, "The parsed RINEX NAV file is empty."
+    yield {"rnx3_nav_file": rnx3_nav_test_file}
+    shutil.rmtree(test_directory)
 
-    # Print the contents of the time_system_corr_dict for debug
-    print("Parsed time_system_corr_dict:", time_system_corr_dict)
-
-    # Ensure that the returned dictionary contains entries for all constellations
-    assert all(constellation in time_system_corr_dict and not math.isnan(time_system_corr_dict[constellation]['A0']) for constellation in ['G', 'R', 'E', 'C', 'I', 'J', 'SBAS']), "Not all constellations are present in the parsed data or some are set to 'nan'."
-
-def test_compute_icb_all_constellations():
-    # Mock time_system_corr_dict with data for testing
-    time_system_corr_dict = {
-        'G': {'A0': 0.0, 'A1': 0.0, 'T': 0},
-        'R': {'A0': 0.0, 'A1': 0.0, 'T': 0},
-        'E': {'A0': 0.0, 'A1': 0.0, 'T': 0},
-        'C': {'A0': 0.0, 'A1': 0.0, 'T': 0},
-        'I': {'A0': 0.0, 'A1': 0.0, 'T': 0},
-        'J': {'A0': 0.0, 'A1': 0.0, 'T': 0},
-        'S': {'A0': 0.0, 'A1': 0.0, 'T': 0}
+def test_compute_inter_constellation_bias_from_rinex3(rnx3_input_for_test):
+    # filepath towards RNX3 NAV file
+    path_to_rnx3_nav_file = converters.anything_to_rinex_3(
+        rnx3_input_for_test["rnx3_nav_file"]
+    )
+    # Parse the RNX3 NAV file
+    computed_time_system_corr_dict  = helpers.parse_rinex_nav_file(path_to_rnx3_nav_file)
+    computed_icb_dict = helpers.compute_icb_all_constellations(computed_time_system_corr_dict)
+    # Manually defined ICB dictionary values
+    manual_icb_dict = {
+        'G': 0.0,
+        'R': 0.8212508723757989,
+        'E': 0.1760018055029068,
+        'C': 0.44217620522989814,
+        'I': -0.8639178475817192,
+        'J': np.nan,
+        'S': np.nan
     }
 
-    # Call the function to compute ICB for all constellations
-    icb_dict = helpers.compute_icb_all_constellations(time_system_corr_dict)
-
     # Ensure that the returned dictionary is not empty
-    assert icb_dict
+    assert computed_icb_dict
 
     # Ensure that the returned dictionary contains entries for all constellations
-    assert all(constellation in icb_dict for constellation in ['G', 'R', 'E', 'C', 'I', 'J', 'S'])
+    assert all(constellation in computed_icb_dict for constellation in ['G', 'R', 'E', 'C', 'I', 'J', 'S'])
 
-    # Ensure that each entry in the dictionary is either a float or NaN
-    assert all(isinstance(icb, (float, int, math.nan)) for icb in icb_dict.values())
+    # Ensure that each entry in the dictionary matches the corresponding manual value
+    for constellation in manual_icb_dict:
+        if math.isnan(computed_icb_dict[constellation]) and math.isnan(manual_icb_dict[constellation]):
+            continue  # Skip if both values are nan
+        assert math.isclose(computed_icb_dict[constellation], manual_icb_dict[constellation], abs_tol=1e-6)
