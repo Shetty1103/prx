@@ -364,8 +364,7 @@ def _build_records_cached(
     sat_states["tropo_delay_m"] = tropo_delay_m
     # Compute time_system_corr_dict somewhere in your code before using it
     sat_states["constellation"] = sat_states["satellite"].str[0]
-    rinex_file_path = r"D:\git_repositories\prx\src\prx\test\tmp_test_directory_prx.test.test_main\BRDC00IGS_R_20230010000_01D_MN.rnx"
-    time_system_corr_dict = helpers.parse_rinex_nav_file(rinex_file_path)  # Define your dictionary here
+    time_system_corr_dict = helpers.parse_rinex_nav_file(rinex_3_ephemerides_file)  # Define your dictionary here
     icb_all_constellations = helpers.compute_icb_all_constellations(time_system_corr_dict)
     # Call the compute_icb_all_constellations function
     sat_states['inter_constellation_bias_m'] = sat_states.apply(lambda row: icb_all_constellations.get(row['constellation'], np.nan), axis=1)
