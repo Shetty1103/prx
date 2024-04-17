@@ -348,7 +348,7 @@ def compute_icb_all_constellations(time_system_corr_dict):
             a1 = time_system_corr_dict[constellation]['A1']
             t = time_system_corr_dict[constellation]['T']
 
-            time_system_corr_ref = ref_a0 + ref_a1 * (t - ref_t)
+            time_system_corr_ref = ref_a0 + ref_a1 * (ref_t - ref_t)
             time_system_corr = a0 + a1 * (t - ref_t)
 
             icb = (time_system_corr_ref - time_system_corr) * constants.cGpsSpeedOfLight_mps
