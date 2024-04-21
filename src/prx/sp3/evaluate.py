@@ -1,23 +1,19 @@
-from functools import lru_cache
 import pandas as pd
 import numpy as np
 from scipy.interpolate import lagrange
 from numpy.polynomial.polynomial import Polynomial
 import georinex
 from pathlib import Path
-import joblib
 import matplotlib.pyplot as plt
 
 from prx import helpers
 from prx import constants
 
-memory = joblib.Memory(Path(__file__).parent.joinpath("diskcache"), verbose=0)
 log = helpers.get_logger(__name__)
 
 
 def parse_sp3_file(file_path: Path):
-    @lru_cache
-    @memory.cache
+    @helpers.cache_call
     def cached_load(file_path: Path, file_hash: str):
         log.info(f"Parsing {file_path} ...")
         parsed = georinex.load(file_path)
@@ -53,7 +49,11 @@ def parse_sp3_file(file_path: Path):
             )
         # Give some columns more pithy names
         df.rename(
-            columns={"position_x": "sat_pos_x_m", "position_y": "sat_pos_y_m", "position_z": "sat_pos_z_m"},
+            columns={
+                "position_x": "sat_pos_x_m",
+                "position_y": "sat_pos_y_m",
+                "position_z": "sat_pos_z_m",
+            },
             inplace=True,
         )
         df.rename(
@@ -100,10 +100,15 @@ def interpolate(df, query_time_gpst_s, plot_interpolation=False):
     assert (
         start_index >= 0
     ), f"We need at least {n_samples_each_side} before the sample closest to the query time to interpolate"
-    assert end_index < len(
-        df.index
+    assert (
+        end_index < len(df.index)
     ), f"We need at least {n_samples_each_side} after the sample closest to the query time to interpolate"
-    columns_to_interpolate = ["sat_pos_x_m", "sat_pos_y_m", "sat_pos_z_m", "sat_clock_offset_m"]
+    columns_to_interpolate = [
+        "sat_pos_x_m",
+        "sat_pos_y_m",
+        "sat_pos_z_m",
+        "sat_clock_offset_m",
+    ]
     interpolated = df[closest_sample_index : closest_sample_index + 1]
     interpolated["gpst_s"] = query_time_gpst_s
     for col in columns_to_interpolate:
@@ -128,11 +133,17 @@ def interpolate(df, query_time_gpst_s, plot_interpolation=False):
         first_derivative = Polynomial(poly.coef[::-1]).deriv(1)(
             query_time_gpst_s - times[0]
         )
-        if col in ["sat_pos_x_m", "sat_pos_y_m", "sat_pos_z_m"]:
-            interpolated[f"d{col}ps"] = first_derivative
-        elif col == "sat_clock_offset_m":
-            interpolated["sat_clock_drift_mps"] = first_derivative
-
+        match col:
+            case "sat_pos_x_m":
+                interpolated["sat_vel_x_mps"] = first_derivative
+            case "sat_pos_y_m":
+                interpolated["sat_vel_y_mps"] = first_derivative
+            case "sat_pos_z_m":
+                interpolated["sat_vel_z_mps"] = first_derivative
+            case "sat_clock_offset_m":
+                interpolated["sat_clock_drift_mps"] = first_derivative
+            case _:
+                log.warning(f"{col} not recognized")
     return interpolated
 
 
@@ -141,11 +152,26 @@ def compute(sp3_file_path, query):
     df = df[df["sv"].isin(query["sv"])]
 
     def interpolate_sat_states(row):
-        sat_pv = interpolate(
-            df[df["sv"] == row["sv"]],
-            helpers.timedelta_2_seconds(row["query_time_isagpst"]),
-        )
-
+        samples = df[df["sv"] == row["sv"]]
+        if len(samples.index) > 0:
+            sat_pv = interpolate(
+                samples,
+                helpers.timedelta_2_seconds(
+                    row["query_time_isagpst"] - constants.cGpstUtcEpoch
+                ),
+            )
+        else:
+            sat_pv = pd.DataFrame()
+            sat_pv["gpst_s"] = [row.query_time_isagpst]
+            sat_pv["sv"] = [row.sv]
+            sat_pv["sat_pos_x_m"] = [np.nan]
+            sat_pv["sat_pos_y_m"] = [np.nan]
+            sat_pv["sat_pos_z_m"] = [np.nan]
+            sat_pv["sat_clock_offset_m"] = [np.nan]
+            sat_pv["sat_vel_x_mps"] = [np.nan]
+            sat_pv["sat_vel_y_mps"] = [np.nan]
+            sat_pv["sat_vel_z_mps"] = [np.nan]
+            sat_pv["sat_clock_drift_mps"] = [np.nan]
         return pd.concat((row.drop("sv"), sat_pv.squeeze()))
 
     query = query.apply(interpolate_sat_states, axis=1).reset_index()

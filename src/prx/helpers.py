@@ -1,28 +1,40 @@
-import hashlib
+import platform
+from pathlib import Path
 import logging
-
-import prx.helpers
-from . import constants
+from prx import constants
 import numpy as np
 import pandas as pd
-import glob
 import subprocess
 import math
 import joblib
 import georinex
 import imohash
-from pathlib import Path
+from functools import lru_cache
+import os
 
 logging.basicConfig(
     format="%(asctime)s,%(msecs)03d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s",
     datefmt="%Y-%m-%d:%H:%M:%S",
     level=logging.DEBUG,
 )
-
 log = logging.getLogger(__name__)
 
 
-memory = joblib.Memory(Path(__file__).parent.joinpath("diskcache"), verbose=0)
+def parse_boolean_env_variable(env_variable_name: str, value_if_not_set: bool):
+    # Based on https://stackoverflow.com/a/65407083/2567449
+    var_string = os.environ.get(env_variable_name, None)
+    if var_string is None:
+        return value_if_not_set
+    var_string = var_string.lower().strip()
+    assert var_string in ("True", "true", "1", "False", "false", "0")
+    return var_string in ("True", "true", "1")
+
+
+disable_caching = parse_boolean_env_variable("PRX_NO_CACHING", False)
+if disable_caching:
+    log.debug("Caching disabled by environment variable PRX_NO_CACHING")
+disk_cache = joblib.Memory(Path(__file__).parent.joinpath("diskcache"), verbose=0)
+
 
 def get_logger(label):
     return logging.getLogger(label)
@@ -124,18 +136,30 @@ def rinex_header_time_string_2_timestamp_ns(time_string: str) -> pd.Timestamp:
 
 
 def repair_with_gfzrnx(file):
-    gfzrnx_binaries = glob.glob(
-        str(prx.helpers.prx_repository_root() / "tools/gfzrnx/**gfzrnx**"),
-        recursive=True,
+    path_folder_gfzrnx = prx_repository_root().joinpath("tools", "gfzrnx")
+    path_binary = path_folder_gfzrnx.joinpath(
+        constants.gfzrnx_binary[platform.system()]
     )
-    assert len(gfzrnx_binaries) > 0, "Could not find any gfzrnx binary"
-    for gfzrnx_binary in gfzrnx_binaries:
-        command = f" {gfzrnx_binary} -finp {file} -fout {file}  -chk -kv -f"
-        result = subprocess.run(command, capture_output=True, shell=True)
-        if result.returncode == 0:
-            log.info(f"Ran gfzrnx file repair on {file}")
-            return file
-    assert False, f"gdzrnx file repair run failed: {result}"
+    command = [
+        str(path_binary),
+        "-finp",
+        str(file),
+        "-fout",
+        str(file),
+        "-chk",
+        "-kv",
+        "-f",
+    ]
+    result = subprocess.run(
+        command,
+        capture_output=True,
+    )
+    if result.returncode == 0:
+        log.info(f"Ran gfzrnx file repair on {file}")
+    else:
+        log.info(f"gfzrnx file repair run failed: {result}")
+        assert False
+    return file
 
 
 def deg_2_rad(angle_deg):
@@ -205,15 +229,6 @@ def build_glonass_slot_dictionary(header_line):
 
 
 def satellite_id_2_system_time_scale(satellite_id):
-    constellation_2_system_time_scale = {
-        "G": "GPST",
-        "S": "SBAST",
-        "E": "GST",
-        "C": "BDT",
-        "R": "GLONASST",
-        "J": "QZSST",
-        "I": "IRNSST",
-    }
     assert (
         len(satellite_id) == 3
     ), f"Satellite ID unexpectedly not three characters long: {satellite_id}"
@@ -228,7 +243,7 @@ def constellation(satellite_id: str):
 
 
 def compute_sagnac_effect(sat_pos_m, rx_pos_m):
-    """compute the sagnac effect (effect of the Earth rotation during signal propagation°
+    """compute the Sagnac effect (effect of the Earth's rotation during signal propagation°
 
     Input:
     - sat_pos_m: satellite ECEF position. np.ndarray of shape (n, 3)
@@ -386,12 +401,9 @@ def compute_satellite_elevation_and_azimuth(sat_pos_ecef, receiver_pos_ecef):
         np.dot(unit_vector_rx_satellite_ecef, unit_e_ecef),
         np.dot(unit_vector_rx_satellite_ecef, unit_n_ecef),
     )
-    sat_elevation_deg = np.rad2deg(elevation_rad)
 
-    up = receiver_pos_ecef / np.linalg.norm(receiver_pos_ecef)
-    angle_up_los_deg = np.rad2deg(np.arccos(np.dot(unit_vector_rx_satellite_ecef, up)))
-    sat_elevation_deg_2 = 90 - angle_up_los_deg
     return elevation_rad, azimuth_rad
+
 
 def ecef_2_geodetic(pos_ecef):
     """Reference:
@@ -420,7 +432,7 @@ def ecef_2_geodetic(pos_ecef):
 
 
 def parse_rinex_obs_file(rinex_file: Path):
-    @memory.cache
+    @cache_call
     def cached_load(rinex_file: Path, file_hash: str):
         log.info(f"Parsing {rinex_file} ...")
         repair_with_gfzrnx(rinex_file)
@@ -435,3 +447,40 @@ def parse_rinex_obs_file(rinex_file: Path):
             f"Hashing file content took {hash_time}, we might want to partially hash the file"
         )
     return cached_load(rinex_file, file_content_hash)
+
+
+def get_gpst_utc_leap_seconds_from_rinex_header(rinex_file: Path):
+    header = georinex.rinexheader(rinex_file)
+    assert "LEAP SECONDS" in header, "LEAP SECONDS not found in RINEX header"
+    ls_before = header["LEAP SECONDS"][0:6].strip()
+    assert (
+        len(ls_before) > 0 and len(ls_before) < 3
+    ), f"Unexpected leap seconds {ls_before} in {rinex_file}"
+    ls_after = header["LEAP SECONDS"][6:12].strip()
+    if ls_after == "":
+        return int(ls_before)
+    assert (
+        len(ls_after) > 0 and len(ls_after) < 3
+    ), f"Unexpected leap seconds {ls_after} in {rinex_file}"
+    assert (
+        ls_after == ls_before
+    ), f"Leap second change annoucement in {rinex_file}, this case is not tested, aborting."
+    return int(ls_before)
+
+
+def is_sorted(iterable):
+    return all(iterable[i] <= iterable[i + 1] for i in range(len(iterable) - 1))
+
+
+def cache_call(func):
+    @lru_cache
+    @disk_cache.cache
+    def wrapper_cached_call(*args, **kwargs):
+        return func(*args, **kwargs)
+
+    def wrapper_uncached_call(*args, **kwargs):
+        return func(*args, **kwargs)
+
+    if disable_caching:
+        return wrapper_uncached_call
+    return wrapper_cached_call
