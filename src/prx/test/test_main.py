@@ -10,7 +10,7 @@ import pytest
 from prx import helpers
 from prx import constants
 from prx import main
-from prx.user import parse_prx_csv_file, spp_pt_lsq, spp_vt_lsq
+from prx.user import parse_prx_csv_file, spp_vt_lsq, spp_pt_lsq, spp_pt_lsq_icb
 
 log = helpers.get_logger(__name__)
 
@@ -151,9 +151,11 @@ def test_spp_lsq(input_for_test):
         df.time_of_reception_in_receiver_time
         == df.time_of_reception_in_receiver_time.min()
     ]
-    for constellations_to_use in [("G", "E", "C"), ("G",), ("E",), ("C",), ("R",)]:
+    for constellations_to_use in [("G", "E", "C"),
+                                  ("G", "C"), ("G", "E"), ("G", "R"), ("G", "I"),
+                                  ("G",), ("E",), ("C",), ("R",), ]:
         obs = df_first_epoch[df.constellation.isin(constellations_to_use)]
-        pt_lsq = spp_pt_lsq(obs)
+        pt_lsq, constellations = spp_pt_lsq(obs)
         vt_lsq = spp_vt_lsq(obs, p_ecef_m=pt_lsq[0:3, :])
         position_offset = pt_lsq[0:3, :] - np.array(
             metadata["approximate_receiver_ecef_position_m"]
@@ -165,9 +167,32 @@ def test_spp_lsq(input_for_test):
         )
         log.info(f"Position offset: {position_offset}")
         log.info(f"Velocity offset: {velocity_offset}")
+        log.info(f"Receiver clock offsets: {pt_lsq[3:].flatten()}")
         assert np.max(np.abs(position_offset)) < 1e1
         assert np.max(np.abs(velocity_offset)) < 1e-1
 
+def test_spp_lsq_icb(input_for_test):
+    df, metadata = run_rinex_through_prx(input_for_test)
+    df["sv"] = df["constellation"].astype(str) + df["prn"].astype(str)
+    df_first_epoch = df[
+        df.time_of_reception_in_receiver_time
+        == df.time_of_reception_in_receiver_time.min()
+    ]
+    for constellations_to_use in [("G", "E", "C"),
+                                  ("G", "C"), ("G", "E"), ("G", "I"), ("G", "R"),
+                                  ("G",), ("E",), ("C",), ("R",), ]:
+        obs = df_first_epoch[df.constellation.isin(constellations_to_use)]
+        pt_lsq, constellations= spp_pt_lsq_icb(obs)
+        position_offset = pt_lsq[0:3, :] - np.array(
+        metadata["approximate_receiver_ecef_position_m"]
+        ).reshape(-1, 1)
+        # Static receiver, so:
+        log.info(
+            f"Using constellations: {constellations_to_use}, {len(obs.sv.unique())} SVs"
+        )
+        log.info(f"Position offset: {position_offset}")
+        log.info(f"Receiver clock offsets: {pt_lsq[3:].flatten()}")
+        assert np.max(np.abs(position_offset)) < 1e1
 
 def test_spp_lsq_for_obs_file_across_two_days(
     input_for_test_with_first_epoch_at_midnight,
@@ -221,6 +246,7 @@ def test_csv_column_names(input_for_test):
         "relativistic_clock_effect_m",
         "sagnac_effect_m",
         "tropo_delay_m",
+        'inter_constellation_bias_m',
         "sat_code_bias_m",
         "carrier_frequency_hz",
         "iono_delay_m",

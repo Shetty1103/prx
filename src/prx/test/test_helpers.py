@@ -10,7 +10,7 @@ from pathlib import Path
 import shutil
 import math
 import os
-import parse_rinex
+from prx import parse_rinex
 import subprocess
 
 log = logging.getLogger(__name__)
@@ -207,41 +207,25 @@ def test_sagnac_effect():
     tolerance = 1e-3
     assert np.max(np.abs(sagnac_effect_computed - sagnac_effect_reference)) < tolerance
 
-@pytest.fixture
-def rnx3_input_for_test():
-    test_directory = Path(f"./tmp_test_directory_{__name__}").resolve()
-    if test_directory.exists():
-        # Start from empty directory, might avoid hiding some subtle bugs, e.g.
-        # file decompression not working properly
-        shutil.rmtree(test_directory)
-    os.makedirs(test_directory)
-
-    rnx3_nav_test_file = test_directory.joinpath("BRDC00IGS_R_20230010000_01D_MN.rnx")
-    shutil.copy(
-        helpers.prx_repository_root()
-        / f"src/prx/test/datasets/TLSE_2023001/{rnx3_nav_test_file.name}",
-        rnx3_nav_test_file,
-    )
-    assert rnx3_nav_test_file.exists()
-
-    yield {"rnx3_nav_file": rnx3_nav_test_file}
-    shutil.rmtree(test_directory)
-
-def test_compute_inter_constellation_bias_from_rinex3(rnx3_input_for_test):
+def test_compute_inter_constellation_bias_from_rinex3(input_for_test):
     # filepath towards RNX3 NAV file
     path_to_rnx3_nav_file = converters.anything_to_rinex_3(
-        rnx3_input_for_test["rnx3_nav_file"]
+        input_for_test["nav"]
     )
+
     # Parse the RNX3 NAV file
-    computed_time_system_corr_dict  = helpers.parse_rinex_nav_file(path_to_rnx3_nav_file)
-    computed_icb_dict = helpers.compute_icb_all_constellations(computed_time_system_corr_dict)
+    computed_time_system_corr_dict= helpers.parse_rinex_nav_file([path_to_rnx3_nav_file])
+
+    t = 3600.0   #For an single EPOCH the value of week of seconds for 2023-01-01 01 00 00
+    w = 2243     #weeks
+    computed_icb_dict = helpers.compute_icb_all_constellations(computed_time_system_corr_dict, t, w)
     # Manually defined ICB dictionary values
     manual_icb_dict = {
         'G': 0.0,
-        'R': 1.256415677,
-        'E': -0.35531,
-        'C': -0.25,
-        'I': -1.396,
+        'R': 0.8279608,
+        'E': -0.73162253,
+        'C': 2.16988596,
+        'I': -1.7321705,
         'J': np.nan,
         'S': np.nan
     }
@@ -256,7 +240,7 @@ def test_compute_inter_constellation_bias_from_rinex3(rnx3_input_for_test):
     for constellation in manual_icb_dict:
         if math.isnan(computed_icb_dict[constellation]) and math.isnan(manual_icb_dict[constellation]):
             continue  # Skip if both values are nan
-        assert math.isclose(computed_icb_dict[constellation], manual_icb_dict[constellation], abs_tol=1e-3)
+        assert math.isclose(computed_icb_dict[constellation], manual_icb_dict[constellation], abs_tol=1e-3)  #millimeter level accuarcy
 
 
 def test_is_sorted():

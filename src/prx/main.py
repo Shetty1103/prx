@@ -8,7 +8,7 @@ import git
 
 from prx import atmospheric_corrections as atmo
 from prx.rinex_nav import nav_file_discovery
-from prx import constants, helpers, converters
+from prx import constants, helpers, converters, user
 from prx.rinex_nav import evaluate as rinex_evaluate
 
 log = helpers.get_logger(__name__)
@@ -387,10 +387,32 @@ def _build_records_cached(
     sat_states["tropo_delay_m"] = tropo_delay_m
     # Compute time_system_corr_dict somewhere in your code before using it
     sat_states["constellation"] = sat_states["satellite"].str[0]
-    time_system_corr_dict = helpers.parse_rinex_nav_file(rinex_3_ephemerides_file)  # Define your dictionary here
-    icb_all_constellations = helpers.compute_icb_all_constellations(time_system_corr_dict)
+    sat_states["time_of_reception_in_receiver_time_weeks_seconds"] = sat_states.apply(
+        lambda row: helpers.timedelta_2_weeks_and_seconds(
+            row.time_of_reception_in_receiver_time
+            - constants.system_time_scale_rinex_utc_epoch["GPST"]
+        )[1],
+        axis=1,
+    )
+    sat_states["time_of_reception_in_receiver_time_weeks"] = sat_states.apply(
+        lambda row: helpers.timedelta_2_weeks_and_seconds(
+            row.time_of_reception_in_receiver_time
+            - constants.system_time_scale_rinex_utc_epoch["GPST"]
+        )[0],
+        axis=1,
+    )
+    time_system_corr_dict = helpers.parse_rinex_nav_file(rinex_3_ephemerides_files)  # Define your dictionary here
+    icb_all_constellations = helpers.compute_icb_all_constellations(time_system_corr_dict, sat_states["time_of_reception_in_receiver_time_weeks_seconds"].values, sat_states["time_of_reception_in_receiver_time_weeks"].values)
     # Call the compute_icb_all_constellations function
-    sat_states['inter_constellation_bias_m'] = sat_states.apply(lambda row: icb_all_constellations.get(row['constellation'], np.nan), axis=1)
+    def get_icb_value(row):
+        constellation = row['constellation']
+        icb_value = icb_all_constellations.get(constellation, np.nan)
+        if isinstance(icb_value, np.ndarray):
+            icb_value = icb_value[row.name]  # Access the value at the current row index
+        return icb_value
+
+    # Apply the function to each row to compute the inter-constellation bias
+    sat_states['inter_constellation_bias_m'] = sat_states.apply(get_icb_value, axis=1)
 
     # Merge in all sat states that are not signal-specific, i.e. can be copied into
     # rows with Doppler and carrier phase observations
@@ -405,6 +427,8 @@ def _build_records_cached(
                 "sat_code_bias_m",
                 "time_of_reception_in_receiver_time",
                 "constellation",
+                "time_of_reception_in_receiver_time_weeks_seconds",
+                "time_of_reception_in_receiver_time_weeks",
             ]
         )
     ].drop_duplicates(subset=["satellite", "time_of_emission_isagpst"])
@@ -494,6 +518,10 @@ def process(observation_file_path: Path, output_format="csv"):
         aux_files["broadcast_ephemerides"],
         metadata["approximate_receiver_ecef_position_m"],
     )
+
+    # Estimate receiver position using the records dataframe
+    #estimated_position = user.spp_pt_lsq(records)  # Add this line to estimate the position
+
     write_prx_file(
         metadata,
         records,

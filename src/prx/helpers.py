@@ -11,6 +11,7 @@ import georinex
 import imohash
 from functools import lru_cache
 import os
+from datetime import timedelta
 
 logging.basicConfig(
     format="%(asctime)s,%(msecs)03d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s",
@@ -276,97 +277,136 @@ def compute_relativistic_clock_effect(sat_pos_m: np.array, sat_vel_mps: np.array
 
     return relativistic_clock_effect_m
 
-
-def parse_rinex_nav_file(file_path):
+def parse_rinex_nav_file(file_paths):
     time_system_corr_dict = {}
-    with open(file_path, 'r') as f:
-        for line in f:
-            if line.startswith("GPUT"):  # Example line indicating TIME SYSTEM CORR for GPS
-                constellation = 'G'
-                data = line.split()
-                time_system_corr_dict[constellation] = {
-                    'A0': float(data[1]),
-                    'A1': float(data[2]),
-                    'T': int(data[3])
+    for file_path in file_paths:
+        with open(str(file_path)) as f:
+            for line in f:
+                if line.startswith("GPUT"):  # Example line indicating TIME SYSTEM CORR for GPS
+                    constellation = 'G'
+                    data = line.split()
+                    time_system_corr_dict[constellation] = {
+                        'A0': float(data[1].replace('D', 'e')),
+                        'A1': float(data[2].replace('D', 'e')),
+                        'A2': int(data[3]),
+                        'T1': int(data[4])
                 }
-            elif line.startswith("GLUT"):  # Example line indicating TIME SYSTEM CORR for GLO
-                constellation = 'R'
-                data = line.split()
-                time_system_corr_dict[constellation] = {
-                    'A0': float(data[1]),  # Exception for GLO
-                    'A1': float(data[2]),
-                    'T': int(data[3])
-                }
-            elif line.startswith("GAUT"):  # Example line indicating TIME SYSTEM CORR for GAL
-                constellation = 'E'
-                data = line.split()
-                # Handle the formatting issue in BDUT line
-                a0 = data[1][:17]
-                time_system_corr_dict[constellation] = {
-                    'A0': float(a0),
-                    'A1': float(data[2]),
-                    'T': int(data[3])
-                }
-            elif line.startswith("BDUT"):  # Example line indicating TIME SYSTEM CORR for BDS
-                constellation = 'C'
-                data = line.split()
-                # Handle the formatting issue in BDUT line
-                a0 = data[1][:17]
-                #a1 = data[1][16:]
-                time_system_corr_dict[constellation] = {
-                    'A0': float(a0), #float(data[1]),#float(a0),
-                    'A1': float(data[2]),#float(a1),
-                    'T': int(data[3])
-                }
-            elif line.startswith("IRUT"):  # Example line indicating TIME SYSTEM CORR for IRN
-                constellation = 'I'
-                data = line.split()
-                # Handle the formatting issue in IRUT line
-                a0 = data[1][:16]  # Splitting the combined A0 and A1 values
-                a1 = data[1][16:]  # Extracting A0 part
-                time_system_corr_dict[constellation] = {
-                    'A0': float(a0),
-                    'A1': float(a1),
-                    'T': int(data[2])
-                }
-            elif line.startswith("QZUT"):  # Example line indicating TIME SYSTEM CORR for QZS
-                constellation = 'J'
-                data = line.split()
-                time_system_corr_dict[constellation] = {
-                    'A0': float(data[1]),
-                    'A1': float(data[2]),
-                    'T': int(data[3])
-                }
-            elif line.startswith("SBUT"):  # Example line indicating TIME SYSTEM CORR for SBAS
-                constellation = 'S'
-                data = line.split()
-                time_system_corr_dict[constellation] = {
-                    'A0': float(data[1]),
-                    'A1': float(data[2]),
-                    'T': int(data[3])
-                }
+                elif line.startswith("GLUT"):  # Example line indicating TIME SYSTEM CORR for GLO
+                    constellation = 'R'
+                    data = line.split()
+                    time_system_corr_dict[constellation] = {
+                        'A0': float(data[1].replace('D', 'e')),
+                        'A1': float(data[2].replace('D', 'e')),
+                        'A2': int(data[3]),
+                        'T1': int(data[4])
+                    }
+                elif line.startswith("GAUT"):  # Example line indicating TIME SYSTEM CORR for GAL
+                    constellation = 'E'
+                    data = line.split()
+                    # Handle the formatting issue in GAUT line
+                    a0 = data[1][:17]
+                    time_system_corr_dict[constellation] = {
+                        'A0': float(a0.replace('D', 'e')),
+                        'A1': float(data[2].replace('D', 'e')),
+                        'A2': int(data[3]),
+                        'T1': int(data[4])
+                    }
+                elif line.startswith("BDUT"):  # Example line indicating TIME SYSTEM CORR for BDS
+                    constellation = 'C'
+                    data = line.split()
+                    # Handle the formatting issue in BDUT line
+                    a0 = data[1][:17]
+                    #a1 = data[1][16:]
+                    time_system_corr_dict[constellation] = {
+                        'A0': float(a0.replace('D', 'e')),
+                        'A1': float(data[2].replace('D', 'e')),
+                        'A2': int(data[3]),
+                        'T1': int(data[4])
+                    }
+                elif line.startswith("IRUT"):  # Example line indicating TIME SYSTEM CORR for IRN
+                    constellation = 'I'
+                    data = line.split()
+                    # Handle the formatting issue in IRUT line
+                    a0 = data[1][:16]  # Splitting the combined A0 and A1 values
+                    a1 = data[1][16:]  # Extracting A0 part
+                    time_system_corr_dict[constellation] = {
+                        'A0': float(a0.replace('D', 'e')),
+                        'A1': -float(a1.replace('D', 'e')), #error in reading it was negative in the file so keeping a -ve sign
+                        'A2': int(data[2]),
+                        'T1': int(data[3])
+                    }
+                elif line.startswith("QZUT"):  # Example line indicating TIME SYSTEM CORR for QZS
+                    constellation = 'J'
+                    data = line.split()
+                    time_system_corr_dict[constellation] = {
+                        'A0': float(data[1].replace('D', 'e')),
+                        'A1': float(data[2].replace('D', 'e')),
+                        'A2': int(data[3]),
+                        'T1': int(data[4])
+                    }
+                elif line.startswith("SBUT"):  # Example line indicating TIME SYSTEM CORR for SBAS
+                    constellation = 'S'
+                    data = line.split()
+                    time_system_corr_dict[constellation] = {
+                        'A0': float(data[1].replace('D', 'e')),
+                        'A1': float(data[2].replace('D', 'e')),
+                        'A2': int(data[3]),
+                        'T1': int(data[4])
+                        }
+                elif line.startswith("GAGP"):  #Example line indicating TIME SYSTEM CORR Glonass to GPS time offset.
+                    constellation = 'GAGP'
+                    data = line.split()
+                    time_system_corr_dict[constellation] = {
+                        'A0': float(data[1].replace('D', 'e')),
+                        'A1': float(data[2].replace('D', 'e')),
+                        'A2': int(data[3]),
+                        'T1': int(data[4])
+                        }
     return time_system_corr_dict
 
 
-def compute_icb_all_constellations(time_system_corr_dict):
-    # Speed of light in meters per second
+def compute_icb_all_constellations(time_system_corr_dict, t, w):
 
     icb_dict = {}  # Dictionary to store ICB values for all constellations
+    w = np.asarray(w)
     # Compute ICB for each constellation
     for constellation in ['G', 'R', 'E', 'C', 'I', 'J', 'S']:
         if constellation in time_system_corr_dict:
-            ref_a0 = time_system_corr_dict['G']['A0']
-            ref_a1 = time_system_corr_dict['G']['A1']
-            ref_t = time_system_corr_dict['G']['T']
+            ref_a0 = time_system_corr_dict['G']['A0']                       #first clock parameter (a0 sec) of the TIME SYSTEM CORR DICT for the reference constellation : GPS
+            ref_a1 = time_system_corr_dict['G']['A1']                       #second clock parameter (a1 sec/sec) of the TIME SYSTEM CORR DICT for the reference constellation : GPS
+            ref_T = timedelta(seconds=time_system_corr_dict['G']['A2'])    #3rd parameter reference time polynomial(T sec into GPS week) of the TIME SYSTEM CORR DICT for the reference constellation : GPS
+            ref_W = time_system_corr_dict['G']['T1']                        #4th parameter reference week number(W GPS week, continuous number) of the TIME SYSTEM CORR DICT for the reference constellation : GPS
 
-            a0 = time_system_corr_dict[constellation]['A0']
+            a0 = time_system_corr_dict[constellation]['A0']                 #similar to the above but for the desired constellations
             a1 = time_system_corr_dict[constellation]['A1']
-            t = time_system_corr_dict[constellation]['T']
+            T = timedelta(seconds=time_system_corr_dict[constellation]['A2'])
+            W = time_system_corr_dict[constellation]['T1']
 
-            time_system_corr_ref = ref_a0 + ref_a1 * (ref_t - ref_t)
-            time_system_corr = a0 + a1 * (t - ref_t)
+            # Extract numeric values from timedelta objects for week_seconds
+            ref_T_seconds = ref_T.total_seconds()
+            T_seconds = T.total_seconds()
 
-            icb = (time_system_corr_ref - time_system_corr) * constants.cGpsSpeedOfLight_mps
+            # Ensure w is a single value for the reference week
+            ref_W = ref_W[0] if isinstance(ref_W, list) else ref_W
+
+            #checking the delta_W and delta_W_ref which should be in a range -127 to 128
+            delta_W_ref = w - ref_W
+            delta_W = w - W
+            # Adjust delta_W_ref if it falls outside the range -127 to 128
+            delta_W_ref = np.where(delta_W_ref < -127, 0, delta_W_ref)
+            delta_W_ref = np.where(delta_W_ref > 128, 0, delta_W_ref)
+
+            # Adjust delta_W if it falls outside the range -127 to 128
+            delta_W = np.where(delta_W < -127, 0, delta_W)
+            delta_W = np.where(delta_W > 128, 0, delta_W)
+            #corrections for both the reference and constellation time
+
+            time_system_corr_ref = ref_a0 + ref_a1 * (t - ref_T_seconds + 604800 * delta_W_ref)
+            time_system_corr = a0 + a1 * (t - T_seconds + 604800 * delta_W)
+
+            # computation of the interconstellation bias
+            icb_seconds = time_system_corr_ref - time_system_corr  #ICB in seconds
+            icb = icb_seconds * constants.cGpsSpeedOfLight_mps    #ICB in meters
             icb_dict[constellation] = icb  # Store ICB with constellation code as key
         else:
             icb_dict[constellation] = np.nan

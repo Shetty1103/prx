@@ -105,4 +105,70 @@ def spp_pt_lsq(df, dx_convergence_l2=1e-6, max_iterations=10):
         assert (
             n_iterations <= max_iterations
         ), "LSQ did not converge in allowed number of iterations"
-    return x_linearization
+    return x_linearization,df.constellation.unique()
+
+
+def spp_pt_lsq_icb(df, dx_convergence_l2=1e-6, max_iterations=10):
+    df = df[df.C_obs_m.notna()]
+    # Add inter-constellation bias correction to the corrected pseudorange observations
+    df["C_obs_m_corrected"] = (
+            df.C_obs_m
+            + df.sat_clock_offset_m
+            + df.relativistic_clock_effect_m
+            - df.sagnac_effect_m
+            - df.iono_delay_m
+            - df.tropo_delay_m
+            - df.sat_code_bias_m
+            - df.inter_constellation_bias_m  # Add inter-constellation bias correction here
+    )
+
+    # Jacobian of pseudorange observation w.r.t. receiver clock offset w.r.t. constellation system clock
+    H_clock = np.ones(
+        (
+            len(df.C_obs_m_corrected),
+            1,
+        )
+    )
+
+    # Initial linearization point
+    x_linearization = np.zeros((3 + 1, 1))
+    solution_increment_l2 = np.inf
+    n_iterations = 0
+
+    while solution_increment_l2 > dx_convergence_l2:
+        # Compute predicted pseudo-range as geometric distance + receiver clock bias, predicted at x_linearization
+        C_obs_m_predicted = (
+                np.linalg.norm(
+                    x_linearization[0:3].T
+                    - df[["sat_pos_x_m", "sat_pos_y_m", "sat_pos_z_m"]].to_numpy(),
+                    axis=1,
+                )
+                + np.squeeze(  # geometric distance
+            H_clock @ x_linearization[3:]
+        )
+        )  # rx to constellation clock bias
+
+        # compute jacobian matrix
+        rx_sat_vectors = (
+                df[["sat_pos_x_m", "sat_pos_y_m", "sat_pos_z_m"]].to_numpy()
+                - x_linearization[:3].T
+        )
+        row_sums = np.linalg.norm(rx_sat_vectors, axis=1)
+        unit_vectors = (rx_sat_vectors.T / row_sums).T
+        # One clock offset per constellation
+        H = np.hstack((-unit_vectors, H_clock))
+
+        # Perform least squares estimation
+        x_lsq, residuals, _, _ = np.linalg.lstsq(
+            H, df.C_obs_m_corrected - C_obs_m_predicted, rcond=None
+        )
+        x_lsq = x_lsq.reshape(-1, 1)
+        solution_increment_l2 = np.linalg.norm(x_lsq)
+        x_linearization += x_lsq
+        n_iterations += 1
+
+        assert (
+                n_iterations <= max_iterations
+        ), "LSQ did not converge in allowed number of iterations"
+
+    return x_linearization,df.constellation.unique()

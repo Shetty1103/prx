@@ -706,56 +706,6 @@ def compute_total_group_delays(
         }
     )
 
-    def compute_inter_constellation_bias(navfile, constellation):
-        rinex_nav_data = [
-            "GPUT -1.8626451492E-09 6.217248938E-15 233472 2243          TIME SYSTEM CORR",
-            "GLUT -6.0535967350E-09 0.000000000E+00      0    0          TIME SYSTEM CORR",
-            "GAUT -9.3132257462E-10 8.881784197E-16 518400 2242          TIME SYSTEM CORR",
-            "GAGP  4.7439243644E-09 4.884981308E-15      0 2243          TIME SYSTEM CORR",
-            "BDUT -4.6566128731E-09 9.769962617E-15 604745  886          TIME SYSTEM CORR",
-            "IRUT  3.1723175198E-09-1.332267630E-15 518688 1218          TIME SYSTEM CORR"
-        ]
-
-        # Initialize dictionary to store ICB values
-        icb_dict = {}
-        # Parse each line in the RINEX NAV data
-        for line in rinex_nav_data:
-            # Split the line into components
-            parts = line.split()
-
-            # Extract satellite identifier
-            satellite_id = parts[0]
-
-            # Extract clock bias for the satellite
-            clock_bias = float(parts[1])
-
-            # Store the clock bias in the dictionary
-            icb_dict[satellite_id] = clock_bias
-
-        # Calculate inter-constellation bias in seconds
-        icb_GPS_GPS_seconds = icb_dict["GPUT"] - icb_dict["GPUT"]
-        icb_GPS_GLONASS_seconds = icb_dict["GPUT"] - icb_dict["GLUT"]  # Example: GPS - GLONASS
-        icb_GPS_QRZSS_seconds = icb_dict["GPUT"] - icb_dict["GAUT"]
-        icb_GPS_GALILEO_seconds = icb_dict["GPUT"] - icb_dict["GAGP"]
-        icb_GPS_BEIDOU_seconds = icb_dict["GPUT"] - icb_dict["BDUT"]
-        icb_GPS_IRNSS_seconds = icb_dict["GPUT"] - icb_dict["IRUT"]
-        # Calculate inter-constellation bias in meters by multiplying by the speed of light
-        icb_GPS_GPS_meters = icb_GPS_GPS_seconds * constants.cGpsSpeedOfLight_mps
-        icb_GPS_GLONASS_meters = icb_GPS_GLONASS_seconds * constants.cGpsSpeedOfLight_mps
-        icb_GPS_QRZSS_meters = icb_GPS_QRZSS_seconds * constants.cGpsSpeedOfLight_mps
-        icb_GPS_GALILEO_meters = icb_GPS_GALILEO_seconds * constants.cGpsSpeedOfLight_mps
-        icb_GPS_BEIDOU_meters = icb_GPS_BEIDOU_seconds * constants.cGpsSpeedOfLight_mps
-        icb_GPS_IRNSS_meters = icb_GPS_IRNSS_seconds * constants.cGpsSpeedOfLight_mps
-        # Print the inter-constellation bias values
-
-        print("Inter-constellation bias of GPS-GPS in meters:", icb_GPS_GPS_meters)
-        print("Inter-constellation bias of GPS-GLONASS in meters:", icb_GPS_GLONASS_meters)
-        print("Inter-constellation bias of GPS-QRZSS in meters:", icb_GPS_QRZSS_meters)
-        print("Inter-constellation bias of GPS-GALILEO in meters:", icb_GPS_GALILEO_meters)
-        print("Inter-constellation bias of GPS-BEIDOU in meters:", icb_GPS_BEIDOU_meters)
-        print("Inter-constellation bias of GPS-IRNSS in meters:", icb_GPS_IRNSS_meters)
-        return  icb_GPS_GPS_meters,icb_GPS_GLONASS_meters,icb_GPS_QRZSS_meters,icb_GPS_GALILEO_meters,icb_GPS_BEIDOU_meters,icb_GPS_IRNSS_meters
-
 
     def compute_tgds(df):
         assert len(df.constellation.unique()) == 1
