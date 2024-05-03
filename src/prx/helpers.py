@@ -371,8 +371,8 @@ def compute_icb_all_constellations(time_system_corr_dict, t, w):
 
             a0 = time_system_corr_dict[constellation]['A0']                 #similar to the above but for the desired constellations
             a1 = time_system_corr_dict[constellation]['A1']
-            T_constellation = timedelta(seconds=time_system_corr_dict[constellation]['T'])
-            W_constellation = time_system_corr_dict[constellation]['W']
+            T_constellations = timedelta(seconds=time_system_corr_dict[constellation]['T'])
+            W_constellations = time_system_corr_dict[constellation]['W']
 
             # Extract numeric values from timedelta objects for week_seconds
             ref_T_seconds = ref_T.total_seconds()
