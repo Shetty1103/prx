@@ -214,7 +214,7 @@ def test_compute_inter_constellation_bias_from_rinex3(input_for_test):
     )
 
     # Parse the RNX3 NAV file
-    computed_time_system_corr_dict= helpers.parse_rinex_nav_file([path_to_rnx3_nav_file])
+    computed_time_system_corr_dict= helpers.parse_time_syst_corr_from_rinex_nav_file([path_to_rnx3_nav_file])
 
     t = 3600.0   #For an single EPOCH the value of week of seconds for 2023-01-01 01 00 00
     w = 2243     #weeks

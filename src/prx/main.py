@@ -401,7 +401,8 @@ def _build_records_cached(
         )[0],
         axis=1,
     )
-    time_system_corr_dict = helpers.parse_rinex_nav_file(rinex_3_ephemerides_files)  # Define your dictionary here
+    time_system_corr_dict = helpers.parse_time_syst_corr_from_rinex_nav_file(
+        rinex_3_ephemerides_files)  # Define your dictionary here
     icb_all_constellations = helpers.compute_icb_all_constellations(time_system_corr_dict, sat_states["time_of_reception_in_receiver_time_weeks_seconds"].values, sat_states["time_of_reception_in_receiver_time_weeks"].values)
     # Call the compute_icb_all_constellations function
     def get_icb_value(row):
