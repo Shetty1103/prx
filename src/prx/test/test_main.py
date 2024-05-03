@@ -155,7 +155,7 @@ def test_spp_lsq(input_for_test):
                                   ("G", "C"), ("G", "E"), ("G", "R"), ("G", "I"),
                                   ("G",), ("E",), ("C",), ("R",), ]:
         obs = df_first_epoch[df.constellation.isin(constellations_to_use)]
-        pt_lsq, constellations = spp_pt_lsq(obs)
+        pt_lsq = spp_pt_lsq(obs)
         vt_lsq = spp_vt_lsq(obs, p_ecef_m=pt_lsq[0:3, :])
         position_offset = pt_lsq[0:3, :] - np.array(
             metadata["approximate_receiver_ecef_position_m"]
@@ -182,7 +182,7 @@ def test_spp_lsq_icb(input_for_test):
                                   ("G", "C"), ("G", "E"), ("G", "I"), ("G", "R"),
                                   ("G",), ("E",), ("C",), ("R",), ]:
         obs = df_first_epoch[df.constellation.isin(constellations_to_use)]
-        pt_lsq, constellations= spp_pt_lsq_icb(obs)
+        pt_lsq = spp_pt_lsq_icb(obs)
         position_offset = pt_lsq[0:3, :] - np.array(
         metadata["approximate_receiver_ecef_position_m"]
         ).reshape(-1, 1)
