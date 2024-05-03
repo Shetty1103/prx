@@ -376,14 +376,14 @@ def compute_icb_all_constellations(time_system_corr_dict, t, w):
 
             # Extract numeric values from timedelta objects for week_seconds
             ref_T_seconds = ref_T.total_seconds()
-            T_seconds = T_constellation.total_seconds()
+            T_seconds = T_constellations.total_seconds()
 
             # Ensure w is a single value for the reference week
             ref_W = ref_W[0] if isinstance(ref_W, list) else ref_W
 
             #checking the delta_W and delta_W_ref which should be in a range -127 to 128
             delta_W_ref = w - ref_W
-            delta_W = w - W_constellation
+            delta_W = w - W_constellations
             # Adjust delta_W_ref if it falls outside the range -127 to 128
             delta_W_ref = np.where(delta_W_ref < -127, 0, delta_W_ref)
             delta_W_ref = np.where(delta_W_ref > 128, 0, delta_W_ref)
