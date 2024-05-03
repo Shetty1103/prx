@@ -12,7 +12,6 @@ import math
 import os
 from prx import parse_rinex
 import subprocess
-
 log = logging.getLogger(__name__)
 
 
@@ -241,8 +240,6 @@ def test_compute_inter_constellation_bias_from_rinex3(input_for_test):
         if math.isnan(computed_icb_dict[constellation]) and math.isnan(manual_icb_dict[constellation]):
             continue  # Skip if both values are nan
         assert math.isclose(computed_icb_dict[constellation], manual_icb_dict[constellation], abs_tol=1e-3)  #millimeter level accuarcy
-
-
 def test_is_sorted():
     assert helpers.is_sorted([1, 2, 3, 4, 5])
     assert not helpers.is_sorted([1, 2, 3, 5, 4])

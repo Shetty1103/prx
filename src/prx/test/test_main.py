@@ -202,24 +202,24 @@ def test_spp_lsq_for_obs_file_across_two_days(input_for_test_with_first_epoch_at
     for constellations_to_use in [("G",)]:
         obs = df_first_epoch[df.constellation.isin(constellations_to_use)]
         pt_lsq = spp_pt_lsq(obs)
+        vt_lsq = spp_vt_lsq(obs, p_ecef_m=pt_lsq[0:3, :])
 
-        # Convert pt_lsq to a NumPy array
-        pt_lsq_array = np.array(pt_lsq)
+        position_offset = pt_lsq[0:3, :] - np.array(
+            metadata["approximate_receiver_ecef_position_m"]
+        ).reshape(-1, 1)
+        # Static receiver, so:
+        velocity_offset = vt_lsq[0:3, :]
 
-        # Ensure that pt_lsq has the correct shape (3, N)
-        if pt_lsq_array.shape != (3, len(obs)):
-            raise ValueError("Invalid shape of pt_lsq. Expected shape (3, N).")
-
-        vt_lsq = spp_vt_lsq(obs, p_ecef_m=pt_lsq_array)
-
-        position_offset = pt_lsq_array - np.array(metadata["approximate_receiver_ecef_position_m"]).reshape(-1, 1)
-        velocity_offset = vt_lsq
-
+        log.info(
+            f"Using constellations: {constellations_to_use}, {len(obs.constellation.unique())} SVs"
+        )
         log.info(f"Position offset: {position_offset}")
         log.info(f"Velocity offset: {velocity_offset}")
-
+        log.info(f"Receiver clock offsets: {pt_lsq[3:].flatten()}")
         assert np.max(np.abs(position_offset)) < 1e1
         assert np.max(np.abs(velocity_offset)) < 1e-1
+
+
 def test_csv_column_names(input_for_test):
     test_file = input_for_test
     main.process(observation_file_path=test_file, output_format="csv")
