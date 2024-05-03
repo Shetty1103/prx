@@ -288,8 +288,8 @@ def parse_rinex_nav_file(file_paths):
                     time_system_corr_dict[constellation] = {
                         'A0': float(data[1].replace('D', 'e')),
                         'A1': float(data[2].replace('D', 'e')),
-                        'A2': int(data[3]),
-                        'T1': int(data[4])
+                        'T': int(data[3]),
+                        'W': int(data[4])
                 }
                 elif line.startswith("GLUT"):  # Example line indicating TIME SYSTEM CORR for GLO
                     constellation = 'R'
@@ -297,8 +297,8 @@ def parse_rinex_nav_file(file_paths):
                     time_system_corr_dict[constellation] = {
                         'A0': float(data[1].replace('D', 'e')),
                         'A1': float(data[2].replace('D', 'e')),
-                        'A2': int(data[3]),
-                        'T1': int(data[4])
+                        'T': int(data[3]),
+                        'W': int(data[4])
                     }
                 elif line.startswith("GAUT"):  # Example line indicating TIME SYSTEM CORR for GAL
                     constellation = 'E'
@@ -308,8 +308,8 @@ def parse_rinex_nav_file(file_paths):
                     time_system_corr_dict[constellation] = {
                         'A0': float(a0.replace('D', 'e')),
                         'A1': float(data[2].replace('D', 'e')),
-                        'A2': int(data[3]),
-                        'T1': int(data[4])
+                        'T': int(data[3]),
+                        'W': int(data[4])
                     }
                 elif line.startswith("BDUT"):  # Example line indicating TIME SYSTEM CORR for BDS
                     constellation = 'C'
@@ -320,8 +320,8 @@ def parse_rinex_nav_file(file_paths):
                     time_system_corr_dict[constellation] = {
                         'A0': float(a0.replace('D', 'e')),
                         'A1': float(data[2].replace('D', 'e')),
-                        'A2': int(data[3]),
-                        'T1': int(data[4])
+                        'T': int(data[3]),
+                        'W': int(data[4])
                     }
                 elif line.startswith("IRUT"):  # Example line indicating TIME SYSTEM CORR for IRN
                     constellation = 'I'
@@ -332,8 +332,8 @@ def parse_rinex_nav_file(file_paths):
                     time_system_corr_dict[constellation] = {
                         'A0': float(a0.replace('D', 'e')),
                         'A1': -float(a1.replace('D', 'e')), #error in reading it was negative in the file so keeping a -ve sign
-                        'A2': int(data[2]),
-                        'T1': int(data[3])
+                        'T': int(data[2]),
+                        'W': int(data[3])
                     }
                 elif line.startswith("QZUT"):  # Example line indicating TIME SYSTEM CORR for QZS
                     constellation = 'J'
@@ -341,8 +341,8 @@ def parse_rinex_nav_file(file_paths):
                     time_system_corr_dict[constellation] = {
                         'A0': float(data[1].replace('D', 'e')),
                         'A1': float(data[2].replace('D', 'e')),
-                        'A2': int(data[3]),
-                        'T1': int(data[4])
+                        'T': int(data[3]),
+                        'W': int(data[4])
                     }
                 elif line.startswith("SBUT"):  # Example line indicating TIME SYSTEM CORR for SBAS
                     constellation = 'S'
@@ -350,18 +350,10 @@ def parse_rinex_nav_file(file_paths):
                     time_system_corr_dict[constellation] = {
                         'A0': float(data[1].replace('D', 'e')),
                         'A1': float(data[2].replace('D', 'e')),
-                        'A2': int(data[3]),
-                        'T1': int(data[4])
+                        'T': int(data[3]),
+                        'W': int(data[4])
                         }
-                elif line.startswith("GAGP"):  #Example line indicating TIME SYSTEM CORR Glonass to GPS time offset.
-                    constellation = 'GAGP'
-                    data = line.split()
-                    time_system_corr_dict[constellation] = {
-                        'A0': float(data[1].replace('D', 'e')),
-                        'A1': float(data[2].replace('D', 'e')),
-                        'A2': int(data[3]),
-                        'T1': int(data[4])
-                        }
+
     return time_system_corr_dict
 
 
@@ -374,24 +366,24 @@ def compute_icb_all_constellations(time_system_corr_dict, t, w):
         if constellation in time_system_corr_dict:
             ref_a0 = time_system_corr_dict['G']['A0']                       #first clock parameter (a0 sec) of the TIME SYSTEM CORR DICT for the reference constellation : GPS
             ref_a1 = time_system_corr_dict['G']['A1']                       #second clock parameter (a1 sec/sec) of the TIME SYSTEM CORR DICT for the reference constellation : GPS
-            ref_T = timedelta(seconds=time_system_corr_dict['G']['A2'])    #3rd parameter reference time polynomial(T sec into GPS week) of the TIME SYSTEM CORR DICT for the reference constellation : GPS
-            ref_W = time_system_corr_dict['G']['T1']                        #4th parameter reference week number(W GPS week, continuous number) of the TIME SYSTEM CORR DICT for the reference constellation : GPS
+            ref_T = timedelta(seconds=time_system_corr_dict['G']['T'])    #3rd parameter reference time polynomial(T sec into GPS week) of the TIME SYSTEM CORR DICT for the reference constellation : GPS
+            ref_W = time_system_corr_dict['G']['W']                        #4th parameter reference week number(W GPS week, continuous number) of the TIME SYSTEM CORR DICT for the reference constellation : GPS
 
             a0 = time_system_corr_dict[constellation]['A0']                 #similar to the above but for the desired constellations
             a1 = time_system_corr_dict[constellation]['A1']
-            T = timedelta(seconds=time_system_corr_dict[constellation]['A2'])
-            W = time_system_corr_dict[constellation]['T1']
+            T_constellation = timedelta(seconds=time_system_corr_dict[constellation]['T'])
+            W_constellation = time_system_corr_dict[constellation]['W']
 
             # Extract numeric values from timedelta objects for week_seconds
             ref_T_seconds = ref_T.total_seconds()
-            T_seconds = T.total_seconds()
+            T_seconds = T_constellation.total_seconds()
 
             # Ensure w is a single value for the reference week
             ref_W = ref_W[0] if isinstance(ref_W, list) else ref_W
 
             #checking the delta_W and delta_W_ref which should be in a range -127 to 128
             delta_W_ref = w - ref_W
-            delta_W = w - W
+            delta_W = w - W_constellation
             # Adjust delta_W_ref if it falls outside the range -127 to 128
             delta_W_ref = np.where(delta_W_ref < -127, 0, delta_W_ref)
             delta_W_ref = np.where(delta_W_ref > 128, 0, delta_W_ref)
