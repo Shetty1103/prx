@@ -105,7 +105,7 @@ def spp_pt_lsq(df, dx_convergence_l2=1e-6, max_iterations=10):
         assert (
             n_iterations <= max_iterations
         ), "LSQ did not converge in allowed number of iterations"
-    return x_linearization,df.constellation.unique()
+    return x_linearization
 
 
 def spp_pt_lsq_icb(df, dx_convergence_l2=1e-6, max_iterations=10):
@@ -171,4 +171,4 @@ def spp_pt_lsq_icb(df, dx_convergence_l2=1e-6, max_iterations=10):
                 n_iterations <= max_iterations
         ), "LSQ did not converge in allowed number of iterations"
 
-    return x_linearization,df.constellation.unique()
+    return x_linearization

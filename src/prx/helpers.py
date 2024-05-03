@@ -277,7 +277,7 @@ def compute_relativistic_clock_effect(sat_pos_m: np.array, sat_vel_mps: np.array
 
     return relativistic_clock_effect_m
 
-def parse_rinex_nav_file(file_paths):
+def parse_time_syst_corr_from_rinex_nav_file(file_paths):
     time_system_corr_dict = {}
     for file_path in file_paths:
         with open(str(file_path)) as f:
