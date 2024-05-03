@@ -162,12 +162,16 @@ def test_spp_lsq(input_for_test):
         ).reshape(-1, 1)
         # Static receiver, so:
         velocity_offset = vt_lsq[0:3, :]
+        # Convert ECEF coordinates to LLA
+        lla = helpers.ecef_2_geodetic(pt_lsq[0:3, :].flatten())
+
         log.info(
             f"Using constellations: {constellations_to_use}, {len(obs.sv.unique())} SVs"
         )
         log.info(f"Position offset: {position_offset}")
         log.info(f"Velocity offset: {velocity_offset}")
         log.info(f"Receiver clock offsets: {pt_lsq[3:].flatten()}")
+        log.info(f"Latitude: {np.degrees(lla[0])}, Longitude: {np.degrees(lla[1])}, Altitude: {lla[2]}")
         assert np.max(np.abs(position_offset)) < 1e1
         assert np.max(np.abs(velocity_offset)) < 1e-1
 
@@ -186,12 +190,15 @@ def test_spp_lsq_icb(input_for_test):
         position_offset = pt_lsq[0:3, :] - np.array(
         metadata["approximate_receiver_ecef_position_m"]
         ).reshape(-1, 1)
-        # Static receiver, so:
+        # Convert ECEF coordinates to LLA
+        lla = helpers.ecef_2_geodetic(pt_lsq[0:3, :].flatten())
+
         log.info(
             f"Using constellations: {constellations_to_use}, {len(obs.sv.unique())} SVs"
         )
         log.info(f"Position offset: {position_offset}")
         log.info(f"Receiver clock offsets: {pt_lsq[3:].flatten()}")
+        log.info(f"Latitude: {np.degrees(lla[0])}, Longitude: {np.degrees(lla[1])}, Altitude: {lla[2]}")
         assert np.max(np.abs(position_offset)) < 1e1
 
 
