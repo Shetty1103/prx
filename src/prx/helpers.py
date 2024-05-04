@@ -358,7 +358,11 @@ def parse_time_syst_corr_from_rinex_nav_file(file_paths):
 
 
 def compute_icb_all_constellations(time_system_corr_dict, t, w):
-
+#From the ICD's that you have provided for the project we found that there is a truncation limit for the
+# (week_at_the_time_of_reception - W_constellation) for each and every constellation for instance
+# in the case of GPS the truncation limit is (-127 to 126) the difference should be in this range or else the deltaW is assumed to be neglible.
+# This neglibilty condition is not exactly specified in any sources but we have consieered it to be negigible in our case.
+# In our algorithm we have used the same logic that's why we are able to get reasonable values for the ICB
     icb_dict = {}  # Dictionary to store ICB values for all constellations
     w = np.asarray(w)
     # Compute ICB for each constellation

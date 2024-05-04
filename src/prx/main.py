@@ -385,7 +385,6 @@ def _build_records_cached(
         sat_states.elevation_rad.to_numpy(),
     )
     sat_states["tropo_delay_m"] = tropo_delay_m
-    # Compute time_system_corr_dict somewhere in your code before using it
     sat_states["constellation"] = sat_states["satellite"].str[0]
     sat_states["time_of_reception_in_receiver_time_weeks_seconds"] = sat_states.apply(
         lambda row: helpers.timedelta_2_weeks_and_seconds(
@@ -401,19 +400,103 @@ def _build_records_cached(
         )[0],
         axis=1,
     )
-    time_system_corr_dict = helpers.parse_time_syst_corr_from_rinex_nav_file(
-        rinex_3_ephemerides_files)  # Define your dictionary here
-    icb_all_constellations = helpers.compute_icb_all_constellations(time_system_corr_dict, sat_states["time_of_reception_in_receiver_time_weeks_seconds"].values, sat_states["time_of_reception_in_receiver_time_weeks"].values)
-    # Call the compute_icb_all_constellations function
-    def get_icb_value(row):
-        constellation = row['constellation']
-        icb_value = icb_all_constellations.get(constellation, np.nan)
-        if isinstance(icb_value, np.ndarray):
-            icb_value = icb_value[row.name]  # Access the value at the current row index
-        return icb_value
+    # Initialize a dictionary to store data for each day
+    sat_states_day = []
 
-    # Apply the function to each row to compute the inter-constellation bias
-    sat_states['inter_constellation_bias_m'] = sat_states.apply(get_icb_value, axis=1)
+    # Initialize a dictionary to store time system corrections
+    time_system_corr_dict = helpers.parse_time_syst_corr_from_rinex_nav_file(
+        rinex_3_ephemerides_files
+    )
+
+    # Compute inter-constellation bias for all constellations
+    icb_all_constellations = helpers.compute_icb_all_constellations(
+        time_system_corr_dict,
+        sat_states["time_of_reception_in_receiver_time_weeks_seconds"].values,
+        sat_states["time_of_reception_in_receiver_time_weeks"].values
+    )
+
+    query = flat_obs[flat_obs["observation_type"].str.startswith("C")]
+    query[["signal", "sv", "query_time_isagpst"]] = query[
+        ["observation_type", "satellite", "time_of_emission_isagpst"]
+    ]
+    # Iterate over NAV files to compute satellite states and inter-constellation bias
+    for file in rinex_3_ephemerides_files:
+        # Get year and doy from NAV filename
+        year = int(file.name[12:16])
+        doy = int(file.name[16:19])
+        log.info(f"Computing satellite states for {year}-{doy:03d}")
+
+        # Compute satellite states for the current day
+        sat_states_day.append( rinex_evaluate.compute_parallel(
+            file,
+            query.loc[
+                (
+                        query.query_time_isagpst
+                        >= pd.Timestamp(year=year, month=1, day=1)
+                        + pd.Timedelta(days=doy - 1)
+                )
+                & (
+                        query.query_time_isagpst
+                        < pd.Timestamp(year=year, month=1, day=1)
+                        + pd.Timedelta(days=doy)
+                )
+                ],
+        )
+        )
+        # Concatenate the list of DataFrames into a single DataFrame
+        sat_states_day_concatenated = pd.concat(sat_states_day)
+        sat_states_day_concatenated = sat_states_day_concatenated.rename(
+            columns={
+                "sv": "satellite",
+                "signal": "observation_type",
+                "query_time_isagpst": "time_of_emission_isagpst",
+            }
+        )
+        sat_states_day_concatenated["constellation"] = sat_states_day_concatenated["satellite"].str[0]
+        # We need Timestamps to compute tropo delays
+        sat_states_day_concatenated = sat_states_day_concatenated.merge(
+            flat_obs[
+                [
+                    "satellite",
+                    "time_of_emission_isagpst",
+                    "time_of_reception_in_receiver_time",
+                ]
+            ].drop_duplicates(),
+            on=["satellite", "time_of_emission_isagpst"],
+            how="left",
+        )
+
+        # Define a function to get inter-constellation bias value for each row
+        def get_icb_value(row):
+            constellation = row['constellation']
+            icb_value = icb_all_constellations.get(constellation, np.nan)
+            if isinstance(icb_value, np.ndarray):
+                icb_value = icb_value[row.name]  # Access the value at the current row index
+            return icb_value
+
+        # Apply the function to each row to compute the inter-constellation bias
+        sat_states_day_concatenated['inter_constellation_bias_m'] = sat_states_day_concatenated.apply(get_icb_value,axis=1)
+        #dropping unnecessary columns and in the sat_states_day_concatenated so that after merging with the sat_states
+        # dataframe will not contain any duplicate datas
+        columns_to_drop = [
+            "observation_type",
+            "sat_code_bias_m",
+            "sat_clock_offset_m", "sat_clock_drift_mps",
+            "time_of_reception_in_receiver_time",
+            "constellation",
+            "frequency_slot", "sat_pos_x_m", "sat_pos_y_m", "sat_pos_z_m",
+            "sat_vel_x_mps", "sat_vel_y_mps", "sat_vel_z_mps",
+        ]
+
+        sat_states_day_concatenated = sat_states_day_concatenated.drop(columns_to_drop, axis=1)
+
+        # Store inter-constellation bias for the current day in a dictionary (not defined in provided code)
+        # corrections_dict[f"{year:04d}{doy:03d}"] = sat_states_day['inter_constellation_bias_m']
+    # Now, sat_states_day_concatenated is a dictionary of dictionaries where the outer keys are 'yyyyddd'
+    # and the inner dictionaries contain inter-constellation bias values for each day
+    # merge the sat_states and sat_states_day_concatenated together so that we can use the combined dataframe that has inter_constellation_bias_m in the sat_specific so that we will have the inter_constellation_bias_m dataframe in the csv output
+    merged_df = pd.merge(sat_states, sat_states_day_concatenated, on=["satellite", "time_of_emission_isagpst"],
+                         how="left")
 
     # Merge in all sat states that are not signal-specific, i.e. can be copied into
     # rows with Doppler and carrier phase observations
@@ -421,8 +504,9 @@ def _build_records_cached(
     #  subset=['satellite', 'time_of_emission_isagpst']
     #  leads to fewer rows here, looks like there are multiple position/velocity/clock values for
     #  the same satellite and the same time of emission
-    sat_specific = sat_states[
-        sat_states.columns.drop(
+
+    sat_specific = merged_df[
+        merged_df.columns.drop(
             [
                 "observation_type",
                 "sat_code_bias_m",
@@ -434,7 +518,7 @@ def _build_records_cached(
         )
     ].drop_duplicates(subset=["satellite", "time_of_emission_isagpst"])
     # Group delays are signal-specific, so we merge them in separately
-    code_specific = sat_states[
+    code_specific = merged_df[
         ["satellite", "observation_type", "time_of_emission_isagpst", "sat_code_bias_m"]
     ].drop_duplicates(
         subset=["satellite", "observation_type", "time_of_emission_isagpst"]
