@@ -109,6 +109,8 @@ def spp_pt_lsq(df, dx_convergence_l2=1e-6, max_iterations=10):
 
 
 def spp_pt_lsq_icb(df, dx_convergence_l2=1e-6, max_iterations=10):
+    # The Values that are obtained by using the ICB algorithm satisfies the positioning offset condition by comparing the positioning offset parameters of the multiconstillation PVT solution with and without
+    # ICB are almost accurate in this function we consider the ICB in the code corrected and get the PVT solution.
     df = df[df.C_obs_m.notna()]
     # Add inter-constellation bias correction to the corrected pseudorange observations
     df["C_obs_m_corrected"] = (

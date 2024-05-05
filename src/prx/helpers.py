@@ -278,6 +278,8 @@ def compute_relativistic_clock_effect(sat_pos_m: np.array, sat_vel_mps: np.array
     return relativistic_clock_effect_m
 
 def parse_time_syst_corr_from_rinex_nav_file(file_paths):
+    #the data are accessed by referring the RINEX The Receiver Independent Exchange Format Version 3.01  in Appendix A8 "A 4 GNSS Navigation Message File - Header Section Description"
+    #detailed explanation on how to assign the "TIME SYSTEM CORR" parameters are provided
     time_system_corr_dict = {}
     for file_path in file_paths:
         with open(str(file_path)) as f:
@@ -363,6 +365,22 @@ def compute_icb_all_constellations(time_system_corr_dict, t, w):
 # in the case of GPS the truncation limit is (-127 to 126) the difference should be in this range or else the deltaW is assumed to be neglible.
 # This neglibilty condition is not exactly specified in any sources but we have consieered it to be negigible in our case.
 # In our algorithm we have used the same logic that's why we are able to get reasonable values for the ICB
+#reference refer book : IS-GPS-200N page number:192 and 193 Subheading:30.3.3.8.2 GPS and GNSS Time for the formulation  ,Table 30-XI. GPS/GNSS Time Offset Parameters
+    #IS-GPS-200N page number: 126 subheading: 20.3.3.5.2.4 Coordinated Universal Time (UTC) details about the truncations are specified here "differ, the absolute value of the difference between the untruncated WN and WNLSF values shall not exceed 127."
+#reference refer book: Beidou_ICD_B2b_v1.0. page number:35,36 subheading "7.12 BDT-GNSS Time Offset Parameters"
+#reference refer book: Galileo_OS_SIS_ICB_v2.0 page number: 49,50 subheading: "5.1.7. GST-UTC Conversion Algorithm and Parameters"
+    # information about the truncation limit of delta_W "the absolute value of the difference between untruncated WN and WNLSF values does not exceed 127"
+    #in the very next page subheading: "5.1.8. GPS to Galileo System Time Conversion and Parameters"
+#reference refer book: is-qzss-pnt-005 page number: 150,151,153 sub-heading "5.11. GNSS Time Offset Correction",
+    # "5.12. UTC Offset Correction" note: information about the truncation limit is given "WNLSF values shall not exceed 127 in order to enable the leap second reference week number to be determined uniquely when ΔtLS and ΔtLSF are not equal."
+#reference refer book: irnss_sps_icd_version1.1-2017 page number:54,
+    # 55 Subheading: "Appendix F. Algorithm for IRNSS time offsets computationwith respect to UTC, UTC(NPLI) and other GNSS"
+    #detailed formulation and explaination about the trunction limit for delta W is given
+    #link for the IRNSS_ICD: "https://www.isro.gov.in/media_isro/pdf/Publications/Vispdf/Pdf2017/irnss_sps_icd_version1.1-2017.pdf"
+#after referring all these documentation the formulation and algorithm for computing the Inter Consetellation Bias is performed in this function.
+
+
+
     icb_dict = {}  # Dictionary to store ICB values for all constellations
     w = np.asarray(w)
     # Compute ICB for each constellation
