@@ -278,7 +278,7 @@ def compute_relativistic_clock_effect(sat_pos_m: np.array, sat_vel_mps: np.array
     return relativistic_clock_effect_m
 
 def parse_time_syst_corr_from_rinex_nav_file(file_paths):
-    #the data are accessed by referring the RINEX The Receiver Independent Exchange Format Version 3.01  in Appendix A8 "A 4 GNSS Navigation Message File - Header Section Description"
+    #the data are accessed by referring the RINEX The Receiver Independent Exchange Format Version 3.05 page 65 and 66 in Table "A 5 GNSS Navigation Message File - Header Section Description"
     #detailed explanation on how to assign the "TIME SYSTEM CORR" parameters are provided
     time_system_corr_dict = {}
     for file_path in file_paths:
@@ -297,7 +297,7 @@ def parse_time_syst_corr_from_rinex_nav_file(file_paths):
                     constellation = 'R'
                     data = line.split()
                     time_system_corr_dict[constellation] = {
-                        'A0': float(data[1].replace('D', 'e')),
+                        'A0': -float(data[1].replace('D', 'e')),  #A0 for GLO is -ve as given in RINEX 3.05 navigation file
                         'A1': float(data[2].replace('D', 'e')),
                         'T': int(data[3]),
                         'W': int(data[4])
@@ -359,11 +359,11 @@ def parse_time_syst_corr_from_rinex_nav_file(file_paths):
     return time_system_corr_dict
 
 
-def compute_icb_all_constellations(time_system_corr_dict, t, w):
+def compute_icb_all_constellations(time_system_corr_dict, t, w, w_bdt):
 #From the ICD's that you have provided for the project we found that there is a truncation limit for the
 # (week_at_the_time_of_reception - W_constellation) for each and every constellation for instance
-# in the case of GPS the truncation limit is (-127 to 126) the difference should be in this range or else the deltaW is assumed to be neglible.
-# This neglibilty condition is not exactly specified in any sources but we have consieered it to be negigible in our case.
+# in the case of GPS the truncation limit is (-128 to 127) the difference should be in this range or else the deltaW is assumed to the upper bound 127.
+# This neglibilty condition is not exactly specified in any sources but we have consieered it to the upper bound 127.
 # In our algorithm we have used the same logic that's why we are able to get reasonable values for the ICB
 #reference refer book : IS-GPS-200N page number:192 and 193 Subheading:30.3.3.8.2 GPS and GNSS Time for the formulation  ,Table 30-XI. GPS/GNSS Time Offset Parameters
     #IS-GPS-200N page number: 126 subheading: 20.3.3.5.2.4 Coordinated Universal Time (UTC) details about the truncations are specified here "differ, the absolute value of the difference between the untruncated WN and WNLSF values shall not exceed 127."
@@ -383,8 +383,10 @@ def compute_icb_all_constellations(time_system_corr_dict, t, w):
 
     icb_dict = {}  # Dictionary to store ICB values for all constellations
     w = np.asarray(w)
+    w_bdt = np.asarray(w_bdt)
     # Compute ICB for each constellation
     for constellation in ['G', 'R', 'E', 'C', 'I', 'J', 'S']:
+
         if constellation in time_system_corr_dict:
             ref_a0 = time_system_corr_dict['G']['A0']                       #first clock parameter (a0 sec) of the TIME SYSTEM CORR DICT for the reference constellation : GPS
             ref_a1 = time_system_corr_dict['G']['A1']                       #second clock parameter (a1 sec/sec) of the TIME SYSTEM CORR DICT for the reference constellation : GPS
@@ -403,23 +405,29 @@ def compute_icb_all_constellations(time_system_corr_dict, t, w):
             # Ensure w is a single value for the reference week
             ref_W = ref_W[0] if isinstance(ref_W, list) else ref_W
 
+            if constellation == 'C':     #as in the case of Beidou the weeks (W_constellations) are in BDS week so we must use the time offset with respect to BDS not GPS
+                w_constellation = w_bdt
+            else:
+                w_constellation = w
             #checking the delta_W and delta_W_ref which should be in a range -127 to 128
-            delta_W_ref = w - ref_W
-            delta_W = w - W_constellations
+            delta_W_ref = w_constellation - ref_W
+            delta_W = w_constellation - W_constellations
             # Adjust delta_W_ref if it falls outside the range -127 to 128
-            delta_W_ref = np.where(delta_W_ref < -127, 0, delta_W_ref)
-            delta_W_ref = np.where(delta_W_ref > 128, 0, delta_W_ref)
+            delta_W_ref = np.where(delta_W_ref < -128, 0, delta_W_ref)
+            delta_W_ref = np.where(delta_W_ref > 127, 127, delta_W_ref)
 
             # Adjust delta_W if it falls outside the range -127 to 128
-            delta_W = np.where(delta_W < -127, 0, delta_W)
-            delta_W = np.where(delta_W > 128, 0, delta_W)
+            delta_W = np.where(delta_W < -128, 0, delta_W)
+            delta_W = np.where(delta_W > 127, 127, delta_W)
+
+
             #corrections for both the reference and constellation time
 
             time_system_corr_ref = ref_a0 + ref_a1 * (t - ref_T_seconds + 604800 * delta_W_ref)
             time_system_corr = a0 + a1 * (t - T_seconds + 604800 * delta_W)
 
             # computation of the interconstellation bias
-            icb_seconds = time_system_corr_ref - time_system_corr  #ICB in seconds
+            icb_seconds = time_system_corr - time_system_corr_ref  #ICB in seconds
             icb = icb_seconds * constants.cGpsSpeedOfLight_mps    #ICB in meters
             icb_dict[constellation] = icb  # Store ICB with constellation code as key
         else:

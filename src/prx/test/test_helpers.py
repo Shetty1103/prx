@@ -217,14 +217,15 @@ def test_compute_inter_constellation_bias_from_rinex3(input_for_test):
 
     t = 3600.0   #For an single EPOCH the value of week of seconds for 2023-01-01 01 00 00
     w = 2243     #weeks
-    computed_icb_dict = helpers.compute_icb_all_constellations(computed_time_system_corr_dict, t, w)
+    w_bdt = 887  #weeks in beidou
+    computed_icb_dict = helpers.compute_icb_all_constellations(computed_time_system_corr_dict, t, w, w_bdt)
     # Manually defined ICB dictionary values
     manual_icb_dict = {
-        'G': 0.0,            # GPS = (-1.8626451E-9 + 6.2172489E-15 * (3600 - 233472 + 604800 * (2243 - 2243 ))) = -3.291816539E-9 seconds and Time system correction for reference = -3.2918165E-9 sec. ICB = time system corr reference - time system corr GPS = (0 sec) * speed of light = 0 m
-        'R': 0.8279608,      # GLONASS = (-6.0535967E-9 + 0 * (3600 - 0 + 604800 * (2243 - 0 ))) = -6.053596E-9 seconds and Time system correction for reference = -3.2918165E-9 sec. ICB = time system corr reference - time system corr GLONASS = (2.761780137924064e-09 sec) * speed of light = 0.8279608 m
-        'E': -0.73162253,    # Galileo = (-9.3132257E-10 + 8.8817841E-16 * (3600 - 518400 + 604800 * (2243 - 2242 ))) = -8.513865131E-9 seconds and Time system correction for reference = -3.2918165E-9 sec. ICB = time system corr reference - time system corr GAL = (-2.440430026E-9 sec) * speed of light = -0.7322 m
-        'C': 2.16988596,     # BEIDOU = (-4.6566128E-9 + 9.7699626E-15 * (3600 - 604745 + 604800 * [(2243 - 886 ) SINCE DELTA NOT IN RANGE ITS ASSUMED TOBE ZERO])) = -1.0529777050496465E-08 seconds and Time system correction for reference = -3.2918165E-9 sec. ICB = time system corr reference - time system corr BEIDOU = (7.237960453420529E-09 sec) * speed of light = 2.16988 m
-        'I': -1.7321705,     # IRNSS = (-3.1723175E-9 + 1.3322676E-15 * (3600 - 518688 + 604800 * [(2243 - 1218 ) SINCE DELTA NOT IN RANGE ITS ASSUMED TOBE ZERO])) = 2.48608245079856E-09 seconds and Time system correction for reference = -3.2918165E-9 sec. ICB = time system corr reference - time system corr IRNSS = (-5.7778990478744955E-09 sec) * speed of light = -1.7316225 m
+        'G': 0.0,            # GPS = (-1.8626451E-9 + 6.2172489E-15 * (3600 - 233472 + 604800 * (2243 - 2243 ))) = -3.291816539E-9 seconds and Time system correction for reference = -3.2918165E-9 sec. ICB = time system corr GPS - time system corr reference = (0 sec) * speed of light = 0 m
+        'R': 2.8016844,      # GLONASS = (6.0535967E-9 + 0 * (3600 - 0 + 604800 * (2243 - 0 ))) = -6.053596E-9 seconds and Time system correction for reference = -3.2918165E-9 sec. ICB = time system corr reference - time system corr GLO = (9.345413332075936E-09 sec) * speed of light = 2.801684433849015 m
+        'E': 0.7316225,      # Galileo = (-9.3132257E-10 + 8.8817841E-16 * (3600 - 518400 + 604800 * (2243 - 2242 ))) = -8.513865131E-9 seconds and Time system correction for reference = -3.2918165E-9 sec. ICB = time system corr GAL - time system corr reference = (2.440430080228936E-09 sec) * speed of light = 0.7316225323289699 m
+        'C': -0.3984502,     # BEIDOU = (-4.6566128E-9 + 9.7699626E-15 * (3600 - 604745 + 604800 * (887 - 886 ) )) = -1.0529777050496465E-08 seconds and Time system correction for reference = -3.2918165E-9 sec. ICB = time system corr BDS - time system corr reference = (-1.3290870626589296E-09 sec) * speed of light = -2.169885955237735 m
+        'I': 32.6517751,     # IRNSS = (-3.1723175E-9 + 1.3322676E-15 * (3600 - 518688 + 604800 * [(2243 - 1218 ) SINCE DELTA NOT IN RANGE ITS ASSUMED TOBE 127])) = 2.48608245079856E-09 seconds and Time system correction for reference = -3.2918165E-9 sec. ICB = time system corr IRNSS - time system corr reference = (1.0810879883629074E-07 sec) * speed of light = 32.41020253455914 m
         'J': np.nan,
         'S': np.nan
     }

@@ -400,6 +400,13 @@ def _build_records_cached(
         )[0],
         axis=1,
     )
+    sat_states["time_of_reception_in_receiver_time_weeks_BDT"] = sat_states.apply(
+        lambda row: helpers.timedelta_2_weeks_and_seconds(
+            row.time_of_reception_in_receiver_time
+            - constants.system_time_scale_rinex_utc_epoch["BDT"]
+        )[0],
+        axis=1,
+    )
     # Initialize a dictionary to store data for each day
     sat_states_day = []
 
@@ -412,7 +419,8 @@ def _build_records_cached(
     icb_all_constellations = helpers.compute_icb_all_constellations(
         time_system_corr_dict,
         sat_states["time_of_reception_in_receiver_time_weeks_seconds"].values,
-        sat_states["time_of_reception_in_receiver_time_weeks"].values
+        sat_states["time_of_reception_in_receiver_time_weeks"].values,
+        sat_states["time_of_reception_in_receiver_time_weeks_BDT"].values
     )
 
     query = flat_obs[flat_obs["observation_type"].str.startswith("C")]
@@ -514,6 +522,7 @@ def _build_records_cached(
                 "constellation",
                 "time_of_reception_in_receiver_time_weeks_seconds",
                 "time_of_reception_in_receiver_time_weeks",
+                "time_of_reception_in_receiver_time_weeks_BDT",
             ]
         )
     ].drop_duplicates(subset=["satellite", "time_of_emission_isagpst"])
