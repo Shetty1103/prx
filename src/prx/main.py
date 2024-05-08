@@ -400,6 +400,13 @@ def _build_records_cached(
         )[0],
         axis=1,
     )
+    sat_states["time_of_reception_in_receiver_time_weeks_seconds_BDT"] = sat_states.apply(
+        lambda row: helpers.timedelta_2_weeks_and_seconds(
+            row.time_of_reception_in_receiver_time
+            - constants.system_time_scale_rinex_utc_epoch["BDT"]
+        )[1],
+        axis=1,
+    )
     sat_states["time_of_reception_in_receiver_time_weeks_BDT"] = sat_states.apply(
         lambda row: helpers.timedelta_2_weeks_and_seconds(
             row.time_of_reception_in_receiver_time
@@ -523,6 +530,7 @@ def _build_records_cached(
                 "time_of_reception_in_receiver_time_weeks_seconds",
                 "time_of_reception_in_receiver_time_weeks",
                 "time_of_reception_in_receiver_time_weeks_BDT",
+                "time_of_reception_in_receiver_time_weeks_seconds_BDT",
             ]
         )
     ].drop_duplicates(subset=["satellite", "time_of_emission_isagpst"])
