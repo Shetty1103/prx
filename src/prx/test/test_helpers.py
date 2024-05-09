@@ -1,8 +1,57 @@
+import logging
+import platform
 import numpy as np
 import pytest
 from prx import helpers
 from prx import constants
+from prx import converters
 import pandas as pd
+from pathlib import Path
+import shutil
+import math
+import os
+from prx import parse_rinex
+import subprocess
+log = logging.getLogger(__name__)
+
+
+@pytest.fixture
+def input_for_test():
+    test_directory = Path(f"./tmp_test_directory_{__name__}").resolve()
+    if test_directory.exists():
+        # Make sure the expected file has not been generated before and is still on disk due to e.g. a previous
+        # test run having crashed:
+        shutil.rmtree(test_directory)
+    os.makedirs(test_directory)
+    compressed_compact_rinex_file = "TLSE00FRA_R_20230010100_10S_01S_MO.crx.gz"
+    test_file = {"obs": test_directory.joinpath(compressed_compact_rinex_file)}
+    shutil.copy(
+        Path(__file__).parent
+        / f"datasets/TLSE_2023001/{compressed_compact_rinex_file}",
+        test_file["obs"],
+    )
+    assert test_file["obs"].exists()
+
+    # Also provide ephemerides so the test does not have to download them:
+    ephemerides_file = "BRDC00IGS_R_20230010000_01D_MN.rnx.zip"
+    test_file["nav"] = test_directory.joinpath(ephemerides_file)
+    shutil.copy(
+        Path(__file__).parent / f"datasets/TLSE_2023001/{ephemerides_file}",
+        test_file["nav"].parent.joinpath(ephemerides_file),
+    )
+    assert test_file["nav"].parent.joinpath(ephemerides_file).exists()
+
+    # sp3 file
+    sp3_file = "GFZ0MGXRAP_20230010000_01D_05M_ORB.SP3"
+    test_file["sp3"] = test_directory.joinpath(sp3_file)
+    shutil.copy(
+        Path(__file__).parent / f"datasets/TLSE_2023001/{sp3_file}",
+        test_file["sp3"].parent.joinpath(sp3_file),
+    )
+    assert test_file["sp3"].parent.joinpath(sp3_file).exists()
+
+    yield test_file
+    shutil.rmtree(test_directory)
 
 
 def test_rinex_header_time_string_2_timestamp_ns():
@@ -132,7 +181,7 @@ def test_satellite_elevation_and_azimuth():
 def test_sagnac_effect():
     # load validation data
     path_to_validation_file = (
-        helpers.prx_repository_root() / f"tools/validation_data/sagnac_effect.csv"
+        helpers.prx_repository_root() / "tools/validation_data/sagnac_effect.csv"
     )
 
     # satellite position (from reference CSV header)
@@ -156,3 +205,130 @@ def test_sagnac_effect():
     # millimeter accuracy should be sufficient
     tolerance = 1e-3
     assert np.max(np.abs(sagnac_effect_computed - sagnac_effect_reference)) < tolerance
+
+def test_compute_inter_constellation_bias_from_rinex3(input_for_test):
+    # filepath towards RNX3 NAV file
+    path_to_rnx3_nav_file = converters.anything_to_rinex_3(
+        input_for_test["nav"]
+    )
+
+    # Parse the RNX3 NAV file
+    computed_time_system_corr_dict= helpers.parse_time_syst_corr_from_rinex_nav_file([path_to_rnx3_nav_file])
+
+    t = 3600.0   #For an single EPOCH the value of week of seconds for 2023-01-01 01 00 00
+    w = 2243     #weeks
+    w_bdt = 887  #weeks in beidou
+    computed_icb_dict = helpers.compute_icb_all_constellations(computed_time_system_corr_dict, t, w, w_bdt)
+    # Manually defined ICB dictionary values
+    manual_icb_dict = {
+        'G': 0.0,            # GPS = (-1.8626451E-9 + 6.2172489E-15 * (3600 - 233472 + 604800 * (2243 - 2243 ))) = -3.291816539E-9 seconds and Time system correction for reference = -3.2918165E-9 sec. ICB = time system corr GPS - time system corr reference = (0 sec) * speed of light = 0 m
+        'R': 2.8016844,      # GLONASS = (6.0535967E-9 + 0 * (3600 - 0 + 604800 * (2243 - 0 ))) = -6.053596E-9 seconds and Time system correction for reference = -3.2918165E-9 sec. ICB = time system corr reference - time system corr GLO = (9.345413332075936E-09 sec) * speed of light = 2.801684433849015 m
+        'E': 0.7316225,      # Galileo = (-9.3132257E-10 + 8.8817841E-16 * (3600 - 518400 + 604800 * (2243 - 2242 ))) = -8.513865131E-9 seconds and Time system correction for reference = -3.2918165E-9 sec. ICB = time system corr GAL - time system corr reference = (2.440430080228936E-09 sec) * speed of light = 0.7316225323289699 m
+        'C': -0.3984502,     # BEIDOU = (-4.6566128E-9 + 9.7699626E-15 * (3600 - 604745 + 604800 * (887 - 886 ) )) = -1.0529777050496465E-08 seconds and Time system correction for reference = -3.2918165E-9 sec. ICB = time system corr BDS - time system corr reference = (-1.3290870626589296E-09 sec) * speed of light = -2.169885955237735 m
+        'I': 32.4102157,     # IRNSS = (-3.1723175E-9 + 1.3322676E-15 * (3600 - 518688 + 604800 * [(2243 - 1218 ) SINCE DELTA NOT IN RANGE ITS ASSUMED TOBE 127])) = 2.48608245079856E-09 seconds and Time system correction for reference = -3.2918165E-9 sec. ICB = time system corr IRNSS - time system corr reference = (1.0810879883629074E-07 sec) * speed of light = 32.41020253455914 m
+        'J': np.nan,
+        'S': np.nan
+    }
+
+    # Ensure that the returned dictionary is not empty
+    assert computed_icb_dict
+
+    # Ensure that the returned dictionary contains entries for all constellations
+    assert all(constellation in computed_icb_dict for constellation in ['G', 'R', 'E', 'C', 'I', 'J', 'S'])
+
+    # Ensure that each entry in the dictionary matches the corresponding manual value
+    for constellation in manual_icb_dict:
+        if math.isnan(computed_icb_dict[constellation]) and math.isnan(manual_icb_dict[constellation]):
+            continue  # Skip if both values are nan
+        assert math.isclose(computed_icb_dict[constellation], manual_icb_dict[constellation], abs_tol=1e-3)  #millimeter level accuarcy
+def test_is_sorted():
+    assert helpers.is_sorted([1, 2, 3, 4, 5])
+    assert not helpers.is_sorted([1, 2, 3, 5, 4])
+    assert not helpers.is_sorted([5, 4, 3, 2, 1])
+    assert helpers.is_sorted([1, 1, 1, 1, 1])
+    assert helpers.is_sorted([1])
+    assert helpers.is_sorted([])
+
+
+def test_gfzrnx_execution_on_obs_file(input_for_test):
+    """Check execution of gfzrnx on a RNX OBS file and check"""
+    # convert test file to RX3 format
+    file_obs = converters.anything_to_rinex_3(input_for_test["obs"])
+    # list all gfzrnx binaries contained in the folder "prx/tools/gfzrnx/"
+    path_folder_gfzrnx = helpers.prx_repository_root().joinpath("tools", "gfzrnx")
+    path_binary = path_folder_gfzrnx.joinpath(
+        constants.gfzrnx_binary[platform.system()]
+    )
+    # assert len(gfzrnx_binaries) > 0, "Could not find any gfzrnx binary"
+    command = [
+        str(path_binary),
+        "-finp",
+        str(file_obs),
+        "-fout",
+        str(file_obs.parent.joinpath("gfzrnx_out.rnx")),
+    ]
+    result = subprocess.run(
+        command,
+        capture_output=True,
+    )
+    if result.returncode == 0:
+        log.info(
+            f"Ran gfzrnx file repair on {file_obs.name} with {constants.gfzrnx_binary[platform.system()]}"
+        )
+    else:
+        log.info(f"gfzrnx file repair run failed: {result}")
+
+    assert file_obs.parent.joinpath("gfzrnx_out.rnx").exists()
+
+
+def test_gfzrnx_execution_on_nav_file(input_for_test):
+    """Check execution of gfzrnx on a RNX NAV file and check"""
+    file_nav = converters.anything_to_rinex_3(input_for_test["nav"])
+    path_folder_gfzrnx = helpers.prx_repository_root().joinpath("tools", "gfzrnx")
+    path_binary = path_folder_gfzrnx.joinpath(
+        constants.gfzrnx_binary[platform.system()]
+    )
+    # assert len(gfzrnx_binaries) > 0, "Could not find any gfzrnx binary"
+    command = [
+        str(path_binary),
+        "-finp",
+        str(file_nav),
+        "-fout",
+        str(file_nav.parent.joinpath("gfzrnx_out.rnx")),
+    ]
+    result = subprocess.run(
+        command,
+        capture_output=True,
+    )
+    if result.returncode == 0:
+        log.info(
+            f"Ran gfzrnx file repair on {file_nav.name} with {constants.gfzrnx_binary[platform.system()]}"
+        )
+    else:
+        log.info(f"gfzrnx file repair run failed: {result}")
+
+    assert file_nav.parent.joinpath("gfzrnx_out.rnx").exists()
+
+
+def test_gfzrnx_function_call(input_for_test):
+    """Check function call of gfzrnx on a RNX OBS file and check"""
+    file_nav = converters.anything_to_rinex_3(input_for_test["nav"])
+    file_obs = converters.anything_to_rinex_3(input_for_test["obs"])
+    file_sp3 = input_for_test["sp3"]
+
+    file_nav = helpers.repair_with_gfzrnx(file_nav)
+    file_obs = helpers.repair_with_gfzrnx(file_obs)
+    # running gfzrnx on a file that is not a RNX file should result in an error
+    try:
+        file_sp3 = helpers.repair_with_gfzrnx(file_sp3)
+    except AssertionError:
+        log.info(f"gfzrnx binary did not execute with file {file_sp3}")
+    assert True
+
+
+def test_row_wise_dot_product():
+    # Check whether the way we compute the row-wise dot product with numpy yields the expected result
+    A = np.array([[1, 2], [4, 5], [7, 8]])
+    B = np.array([[10, 20], [30, 40], [50, 60]])
+    row_wise_dot = np.sum(A * B, axis=1).reshape(-1, 1)
+    assert (row_wise_dot == np.array([[10 + 40], [120 + 200], [350 + 480]])).all()

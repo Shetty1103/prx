@@ -1,29 +1,40 @@
-import hashlib
+import platform
 from pathlib import Path
 import logging
-
-import prx.helpers
-from . import constants
+from prx import constants
 import numpy as np
 import pandas as pd
-import glob
 import subprocess
 import math
 import joblib
 import georinex
 import imohash
-
-
-memory = joblib.Memory(Path(__file__).parent.joinpath("diskcache"), verbose=0)
-
+from functools import lru_cache
+import os
+from datetime import timedelta
 
 logging.basicConfig(
     format="%(asctime)s,%(msecs)03d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s",
     datefmt="%Y-%m-%d:%H:%M:%S",
     level=logging.DEBUG,
 )
-
 log = logging.getLogger(__name__)
+
+
+def parse_boolean_env_variable(env_variable_name: str, value_if_not_set: bool):
+    # Based on https://stackoverflow.com/a/65407083/2567449
+    var_string = os.environ.get(env_variable_name, None)
+    if var_string is None:
+        return value_if_not_set
+    var_string = var_string.lower().strip()
+    assert var_string in ("True", "true", "1", "False", "false", "0")
+    return var_string in ("True", "true", "1")
+
+
+disable_caching = parse_boolean_env_variable("PRX_NO_CACHING", False)
+if disable_caching:
+    log.debug("Caching disabled by environment variable PRX_NO_CACHING")
+disk_cache = joblib.Memory(Path(__file__).parent.joinpath("diskcache"), verbose=0)
 
 
 def get_logger(label):
@@ -126,18 +137,30 @@ def rinex_header_time_string_2_timestamp_ns(time_string: str) -> pd.Timestamp:
 
 
 def repair_with_gfzrnx(file):
-    gfzrnx_binaries = glob.glob(
-        str(prx.helpers.prx_repository_root() / "tools/gfzrnx/**gfzrnx**"),
-        recursive=True,
+    path_folder_gfzrnx = prx_repository_root().joinpath("tools", "gfzrnx")
+    path_binary = path_folder_gfzrnx.joinpath(
+        constants.gfzrnx_binary[platform.system()]
     )
-    assert len(gfzrnx_binaries) > 0, "Could not find any gfzrnx binary"
-    for gfzrnx_binary in gfzrnx_binaries:
-        command = f" {gfzrnx_binary} -finp {file} -fout {file}  -chk -kv -f"
-        result = subprocess.run(command, capture_output=True, shell=True)
-        if result.returncode == 0:
-            log.info(f"Ran gfzrnx file repair on {file}")
-            return file
-    assert False, f"gdzrnx file repair run failed: {result}"
+    command = [
+        str(path_binary),
+        "-finp",
+        str(file),
+        "-fout",
+        str(file),
+        "-chk",
+        "-kv",
+        "-f",
+    ]
+    result = subprocess.run(
+        command,
+        capture_output=True,
+    )
+    if result.returncode == 0:
+        log.info(f"Ran gfzrnx file repair on {file}")
+    else:
+        log.info(f"gfzrnx file repair run failed: {result}")
+        assert False
+    return file
 
 
 def deg_2_rad(angle_deg):
@@ -207,15 +230,6 @@ def build_glonass_slot_dictionary(header_line):
 
 
 def satellite_id_2_system_time_scale(satellite_id):
-    constellation_2_system_time_scale = {
-        "G": "GPST",
-        "S": "SBAST",
-        "E": "GST",
-        "C": "BDT",
-        "R": "GLONASST",
-        "J": "QZSST",
-        "I": "IRNSST",
-    }
     assert (
         len(satellite_id) == 3
     ), f"Satellite ID unexpectedly not three characters long: {satellite_id}"
@@ -230,7 +244,7 @@ def constellation(satellite_id: str):
 
 
 def compute_sagnac_effect(sat_pos_m, rx_pos_m):
-    """compute the sagnac effect (effect of the Earth rotation during signal propagation°
+    """compute the Sagnac effect (effect of the Earth's rotation during signal propagation°
 
     Input:
     - sat_pos_m: satellite ECEF position. np.ndarray of shape (n, 3)
@@ -263,6 +277,162 @@ def compute_relativistic_clock_effect(sat_pos_m: np.array, sat_vel_mps: np.array
 
     return relativistic_clock_effect_m
 
+def parse_time_syst_corr_from_rinex_nav_file(file_paths):
+    #the data are accessed by referring the RINEX The Receiver Independent Exchange Format Version 3.05 page 65 and 66 in Table "A 5 GNSS Navigation Message File - Header Section Description"
+    #detailed explanation on how to assign the "TIME SYSTEM CORR" parameters are provided
+    time_system_corr_dict = {}
+    for file_path in file_paths:
+        with open(str(file_path)) as f:
+            for line in f:
+                if line.startswith("GPUT"):  # Example line indicating TIME SYSTEM CORR for GPS
+                    constellation = 'G'
+                    data = line.split()
+                    time_system_corr_dict[constellation] = {
+                        'A0': float(data[1].replace('D', 'e')),
+                        'A1': float(data[2].replace('D', 'e')),
+                        'T': int(data[3]),
+                        'W': int(data[4])
+                }
+                elif line.startswith("GLUT"):  # Example line indicating TIME SYSTEM CORR for GLO
+                    constellation = 'R'
+                    data = line.split()
+                    time_system_corr_dict[constellation] = {
+                        'A0': -float(data[1].replace('D', 'e')),  #A0 for GLO is -ve as given in RINEX 3.05 navigation file
+                        'A1': float(data[2].replace('D', 'e')),
+                        'T': int(data[3]),
+                        'W': int(data[4])
+                    }
+                elif line.startswith("GAUT"):  # Example line indicating TIME SYSTEM CORR for GAL
+                    constellation = 'E'
+                    data = line.split()
+                    # Handle the formatting issue in GAUT line
+                    a0 = data[1][:17]
+                    time_system_corr_dict[constellation] = {
+                        'A0': float(a0.replace('D', 'e')),
+                        'A1': float(data[2].replace('D', 'e')),
+                        'T': int(data[3]),
+                        'W': int(data[4])
+                    }
+                elif line.startswith("BDUT"):  # Example line indicating TIME SYSTEM CORR for BDS
+                    constellation = 'C'
+                    data = line.split()
+                    # Handle the formatting issue in BDUT line
+                    a0 = data[1][:17]
+                    #a1 = data[1][16:]
+                    time_system_corr_dict[constellation] = {
+                        'A0': float(a0.replace('D', 'e')),
+                        'A1': float(data[2].replace('D', 'e')),
+                        'T': int(data[3]),
+                        'W': int(data[4])
+                    }
+                elif line.startswith("IRUT"):  # Example line indicating TIME SYSTEM CORR for IRN
+                    constellation = 'I'
+                    data = line.split()
+                    # Handle the formatting issue in IRUT line
+                    a0 = data[1][:16]  # Splitting the combined A0 and A1 values
+                    a1 = data[1][16:]  # Extracting A0 part
+                    time_system_corr_dict[constellation] = {
+                        'A0': float(a0.replace('D', 'e')),
+                        'A1': -float(a1.replace('D', 'e')), #error in reading it was negative in the file so keeping a -ve sign
+                        'T': int(data[2]),
+                        'W': int(data[3])
+                    }
+                elif line.startswith("QZUT"):  # Example line indicating TIME SYSTEM CORR for QZS
+                    constellation = 'J'
+                    data = line.split()
+                    time_system_corr_dict[constellation] = {
+                        'A0': float(data[1].replace('D', 'e')),
+                        'A1': float(data[2].replace('D', 'e')),
+                        'T': int(data[3]),
+                        'W': int(data[4])
+                    }
+                elif line.startswith("SBUT"):  # Example line indicating TIME SYSTEM CORR for SBAS
+                    constellation = 'S'
+                    data = line.split()
+                    time_system_corr_dict[constellation] = {
+                        'A0': float(data[1].replace('D', 'e')),
+                        'A1': float(data[2].replace('D', 'e')),
+                        'T': int(data[3]),
+                        'W': int(data[4])
+                        }
+
+    return time_system_corr_dict
+
+
+def compute_icb_all_constellations(time_system_corr_dict, t, w, w_bdt):
+#From the ICD's that you have provided for the project we found that there is a truncation limit for the
+# (week_at_the_time_of_reception - W_constellation) for each and every constellation for instance
+# in the case of GPS the truncation limit is (-128 to 127) the difference should be in this range or else the deltaW is assumed to the upper bound 127.
+# This neglibilty condition is not exactly specified in any sources but we have consieered it to the upper bound 127.
+# In our algorithm we have used the same logic that's why we are able to get reasonable values for the ICB
+#reference refer book : IS-GPS-200N page number:192 and 193 Subheading:30.3.3.8.2 GPS and GNSS Time for the formulation  ,Table 30-XI. GPS/GNSS Time Offset Parameters
+    #IS-GPS-200N page number: 126 subheading: 20.3.3.5.2.4 Coordinated Universal Time (UTC) details about the truncations are specified here "differ, the absolute value of the difference between the untruncated WN and WNLSF values shall not exceed 127."
+#reference refer book: Beidou_ICD_B2b_v1.0. page number:35,36 subheading "7.12 BDT-GNSS Time Offset Parameters"
+#reference refer book: Galileo_OS_SIS_ICB_v2.0 page number: 49,50 subheading: "5.1.7. GST-UTC Conversion Algorithm and Parameters"
+    # information about the truncation limit of delta_W "the absolute value of the difference between untruncated WN and WNLSF values does not exceed 127"
+    #in the very next page subheading: "5.1.8. GPS to Galileo System Time Conversion and Parameters"
+#reference refer book: is-qzss-pnt-005 page number: 150,151,153 sub-heading "5.11. GNSS Time Offset Correction",
+    # "5.12. UTC Offset Correction" note: information about the truncation limit is given "WNLSF values shall not exceed 127 in order to enable the leap second reference week number to be determined uniquely when ΔtLS and ΔtLSF are not equal."
+#reference refer book: irnss_sps_icd_version1.1-2017 page number:54,
+    # 55 Subheading: "Appendix F. Algorithm for IRNSS time offsets computationwith respect to UTC, UTC(NPLI) and other GNSS"
+    #detailed formulation and explaination about the trunction limit for delta W is given
+    #link for the IRNSS_ICD: "https://www.isro.gov.in/media_isro/pdf/Publications/Vispdf/Pdf2017/irnss_sps_icd_version1.1-2017.pdf"
+#after referring all these documentation the formulation and algorithm for computing the Inter Consetellation Bias is performed in this function.
+
+
+
+    icb_dict = {}  # Dictionary to store ICB values for all constellations
+    w = np.asarray(w)
+    w_bdt = np.asarray(w_bdt)
+    # Compute ICB for each constellation
+    for constellation in ['G', 'R', 'E', 'C', 'I', 'J', 'S']:
+
+        if constellation in time_system_corr_dict:
+            ref_a0 = time_system_corr_dict['G']['A0']                       #first clock parameter (a0 sec) of the TIME SYSTEM CORR DICT for the reference constellation : GPS
+            ref_a1 = time_system_corr_dict['G']['A1']                       #second clock parameter (a1 sec/sec) of the TIME SYSTEM CORR DICT for the reference constellation : GPS
+            ref_T = timedelta(seconds=time_system_corr_dict['G']['T'])    #3rd parameter reference time polynomial(T sec into GPS week) of the TIME SYSTEM CORR DICT for the reference constellation : GPS
+            ref_W = time_system_corr_dict['G']['W']                        #4th parameter reference week number(W GPS week, continuous number) of the TIME SYSTEM CORR DICT for the reference constellation : GPS
+
+            a0 = time_system_corr_dict[constellation]['A0']                 #similar to the above but for the desired constellations
+            a1 = time_system_corr_dict[constellation]['A1']
+            T_constellations = timedelta(seconds=time_system_corr_dict[constellation]['T'])
+            W_constellations = time_system_corr_dict[constellation]['W']
+
+            # Extract numeric values from timedelta objects for week_seconds
+            ref_T_seconds = ref_T.total_seconds()
+            T_seconds = T_constellations.total_seconds()
+
+            # Ensure w is a single value for the reference week
+            ref_W = ref_W[0] if isinstance(ref_W, list) else ref_W
+
+            if constellation == 'C':     #as in the case of Beidou the weeks (W_constellations) are in BDS week so we must use the time offset with respect to BDS not GPS
+                w_constellation = w_bdt
+            else:
+                w_constellation = w
+            #checking the delta_W and delta_W_ref which should be in a range -127 to 128
+            delta_W_ref = w_constellation - ref_W
+            delta_W = w_constellation - W_constellations
+            # Adjust delta_W_ref if it falls outside the range -127 to 128
+            delta_W_ref = np.where(delta_W_ref < -128, 0, delta_W_ref)
+            delta_W_ref = np.where(delta_W_ref > 127, 127, delta_W_ref)
+
+            # Adjust delta_W if it falls outside the range -127 to 128
+            delta_W = np.where(delta_W < -128, 0, delta_W)
+            delta_W = np.where(delta_W > 127, 127, delta_W)
+
+
+            #corrections for both the reference and constellation time
+
+            time_system_corr_ref = ref_a0 + ref_a1 * (t - ref_T_seconds + 604800 * delta_W_ref)
+            time_system_corr = a0 + a1 * (t - T_seconds + 604800 * delta_W)
+
+            # computation of the interconstellation bias
+            icb_seconds = time_system_corr - time_system_corr_ref  #ICB in seconds
+            icb = icb_seconds * constants.cGpsSpeedOfLight_mps    #ICB in meters
+            icb_dict[constellation] = icb  # Store ICB with constellation code as key
+        else:
+            icb_dict[constellation] = np.nan
+    return icb_dict
 
 def compute_satellite_elevation_and_azimuth(sat_pos_ecef, receiver_pos_ecef):
     """
@@ -293,11 +463,7 @@ def compute_satellite_elevation_and_azimuth(sat_pos_ecef, receiver_pos_ecef):
         np.dot(unit_vector_rx_satellite_ecef, unit_e_ecef),
         np.dot(unit_vector_rx_satellite_ecef, unit_n_ecef),
     )
-    elevation_deg = np.rad2deg(elevation_rad)
 
-    up = receiver_pos_ecef / np.linalg.norm(receiver_pos_ecef)
-    angle_up_los_deg = np.rad2deg(np.arccos(np.dot(unit_vector_rx_satellite_ecef, up)))
-    elevation_deg_2 = 90 - angle_up_los_deg
     return elevation_rad, azimuth_rad
 
 
@@ -328,7 +494,7 @@ def ecef_2_geodetic(pos_ecef):
 
 
 def parse_rinex_obs_file(rinex_file: Path):
-    @memory.cache
+    @cache_call
     def cached_load(rinex_file: Path, file_hash: str):
         log.info(f"Parsing {rinex_file} ...")
         repair_with_gfzrnx(rinex_file)
@@ -343,3 +509,40 @@ def parse_rinex_obs_file(rinex_file: Path):
             f"Hashing file content took {hash_time}, we might want to partially hash the file"
         )
     return cached_load(rinex_file, file_content_hash)
+
+
+def get_gpst_utc_leap_seconds_from_rinex_header(rinex_file: Path):
+    header = georinex.rinexheader(rinex_file)
+    assert "LEAP SECONDS" in header, "LEAP SECONDS not found in RINEX header"
+    ls_before = header["LEAP SECONDS"][0:6].strip()
+    assert (
+        len(ls_before) > 0 and len(ls_before) < 3
+    ), f"Unexpected leap seconds {ls_before} in {rinex_file}"
+    ls_after = header["LEAP SECONDS"][6:12].strip()
+    if ls_after == "":
+        return int(ls_before)
+    assert (
+        len(ls_after) > 0 and len(ls_after) < 3
+    ), f"Unexpected leap seconds {ls_after} in {rinex_file}"
+    assert (
+        ls_after == ls_before
+    ), f"Leap second change annoucement in {rinex_file}, this case is not tested, aborting."
+    return int(ls_before)
+
+
+def is_sorted(iterable):
+    return all(iterable[i] <= iterable[i + 1] for i in range(len(iterable) - 1))
+
+
+def cache_call(func):
+    @lru_cache
+    @disk_cache.cache
+    def wrapper_cached_call(*args, **kwargs):
+        return func(*args, **kwargs)
+
+    def wrapper_uncached_call(*args, **kwargs):
+        return func(*args, **kwargs)
+
+    if disable_caching:
+        return wrapper_uncached_call
+    return wrapper_cached_call
